@@ -65,9 +65,24 @@ npm run dev   # http://localhost:8787
 
 ### デプロイ
 
+**自分のPC・サーバーから**（Cloudflareへ直接ネットワーク到達できる環境):
+
 ```bash
 npm run deploy
 ```
+
+**GitHub Actions から**（サンドボックス環境からは Cloudflare API へ直接到達できないため、こちらを利用):
+
+`.github/workflows/deploy.yml` が push / 手動実行でデプロイします。リポジトリの Settings → Secrets and variables → Actions で以下を登録してください。
+
+| Secret名 | 値 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflareで発行したAPIトークン |
+| `CLOUDFLARE_ACCOUNT_ID` | CloudflareアカウントID |
+| `ANTHROPIC_API_KEY` | Claude APIキー |
+| `APP_SESSION_SECRET` | セッション署名用のランダムな文字列（`openssl rand -hex 32` 等で生成） |
+
+登録後、Actions タブから `Deploy to Cloudflare Workers` を手動実行（Run workflow）するか、このブランチへpushすると自動デプロイされます。
 
 ## 管理者アカウントの作成（初回のみ）
 
