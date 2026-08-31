@@ -1,8 +1,13 @@
 // Password hashing (PBKDF2-SHA256 via WebCrypto) and session cookie signing.
-// Workers runtime has no bcrypt/scrypt native module, so PBKDF2 with a high
-// iteration count is the standard WebCrypto-only choice here.
-
-const PBKDF2_ITERATIONS = 210_000;
+// Workers runtime has no bcrypt/scrypt native module, so PBKDF2 is the
+// standard WebCrypto-only choice here. The iteration count is capped well
+// below what OWASP recommends (600k) because Cloudflare Workers on the Free
+// plan hard-limits CPU time to 10ms per request - a higher count reliably
+// blows that budget and the request fails with a 500. ~10k iterations costs
+// a few ms, leaving headroom for the rest of the request. Upgrading to the
+// Workers Paid plan (30s CPU budget) removes that ceiling if a stronger
+// value is wanted.
+const PBKDF2_ITERATIONS = 10_000;
 
 function toHex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
