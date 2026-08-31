@@ -6,6 +6,9 @@ on:
     branches:
       - claude/ai-chat-app-build-s7fut7
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
