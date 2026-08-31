@@ -1,0 +1,27 @@
+{
+  "name": "geo-decision-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build:frontend": "npm run build --workspace frontend",
+    "dev": "npm run build:frontend && wrangler dev",
+    "deploy": "npm run build:frontend && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply geo-decision-agent-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply geo-decision-agent-db --remote",
+    "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "devDependencies": {
+    "wrangler": "^4.127.1",
+    "typescript": "^5.7.2",
+    "@cloudflare/workers-types": "^5.20260828.1"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "hono": "^4.13.5"
+  }
+}

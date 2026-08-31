@@ -1,0 +1,32 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+:root {
+  --gda-navy: #0e1b2b;
+  --gda-navy-light: #16283d;
+  --gda-green: #1f7a4d;
+  --gda-green-dark: #175c3a;
+  --gda-amber: #b98420;
+  --gda-red: #b3432b;
+  --gda-bg: #f4f6f8;
+  --gda-border: #e2e6ea;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--gda-bg);
+  color: #1a2532;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", "Segoe UI", sans-serif;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #c7ccd1;
+  border-radius: 3px;
+}
