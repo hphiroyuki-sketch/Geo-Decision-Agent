@@ -11,6 +11,9 @@ import {
   SAMPLE_BATCH,
   CELL_CLASS_COLOR,
   CELL_CLASS_LABEL,
+  PRIORITY_A_THRESHOLD,
+  SIMILAR_THRESHOLD,
+  CHANGED_THRESHOLD,
   type CellClass,
 } from "../lib/mesh";
 import { buildRecoveryPlan } from "../lib/recoveryPlan";
@@ -416,4 +419,97 @@ meshRoutes.post("/recovery-actions/:actionId", async (c) => {
     .run();
   await logAudit(c.env.DB, user.id, "recovery_action.update", actionId, body);
   return c.json({ ok: true });
+});
+
+/**
+ * Pre-flight for the mesh screen: where the reference points are, and where a
+ * mesh could sensibly be centred.
+ *
+ * This exists because the first real run centred a mesh on the project centre
+ * in Nagano while the only confirmed field records were in Osaka, 400km away.
+ * Every cell scored 0.09-0.20 similarity and nothing was classified - correct
+ * arithmetic, useless output, and nothing on screen said why. The distance is
+ * now something the user is told before spending minutes sampling.
+ */
+meshRoutes.get("/projects/:id/mesh-context", async (c) => {
+  const projectId = c.req.param("id");
+
+  const project = await c.env.DB.prepare(
+    "SELECT name, center_lat, center_lng, area_ha FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ name: string; center_lat: number | null; center_lng: number | null; area_ha: number | null }>();
+  if (!project) return c.json({ error: "プロジェクトが見つかりません。" }, 404);
+
+  const { results: confirmed } = await c.env.DB.prepare(
+    `SELECT id, lat, lng, species_guess FROM field_records
+     WHERE project_id = ? AND review_status = 'confirmed' ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(projectId)
+    .all<{ id: string; lat: number; lng: number; species_guess: string | null }>();
+
+  const { results: unreviewed } = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM field_records WHERE project_id = ? AND review_status = 'unreviewed'`,
+  )
+    .bind(projectId)
+    .all<{ n: number }>();
+
+  const referenceCentroid =
+    confirmed.length > 0
+      ? {
+          lat: confirmed.reduce((s, r) => s + r.lat, 0) / confirmed.length,
+          lng: confirmed.reduce((s, r) => s + r.lng, 0) / confirmed.length,
+        }
+      : null;
+
+  const year = Number(await getSetting(c.env.DB, "earth_engine_year", "2024"));
+
+  return c.json({
+    project: { name: project.name, centerLat: project.center_lat, centerLng: project.center_lng, areaHa: project.area_ha },
+    confirmedRecords: confirmed,
+    unreviewedCount: unreviewed[0]?.n ?? 0,
+    referenceCentroid,
+    year,
+    maxCells: MAX_CELLS,
+    batchSize: SAMPLE_BATCH,
+  });
+});
+
+/** Distribution of the sampled values, so a mesh that classified nothing can
+ *  still explain itself (how close did anything get to a threshold?). */
+meshRoutes.get("/meshes/:meshId/stats", async (c) => {
+  const meshId = c.req.param("meshId");
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS sampled,
+            MIN(reference_similarity) AS sim_min, MAX(reference_similarity) AS sim_max,
+            AVG(reference_similarity) AS sim_avg,
+            MIN(change_score) AS chg_min, MAX(change_score) AS chg_max, AVG(change_score) AS chg_avg
+     FROM mesh_cells WHERE mesh_id = ? AND status = 'sampled'`,
+  )
+    .bind(meshId)
+    .first<{
+      sampled: number;
+      sim_min: number | null;
+      sim_max: number | null;
+      sim_avg: number | null;
+      chg_min: number | null;
+      chg_max: number | null;
+      chg_avg: number | null;
+    }>();
+
+  const { results: byClass } = await c.env.DB.prepare(
+    `SELECT cell_class, COUNT(*) AS n FROM mesh_cells WHERE mesh_id = ? AND status = 'sampled' GROUP BY cell_class`,
+  )
+    .bind(meshId)
+    .all<{ cell_class: string; n: number }>();
+
+  return c.json({
+    stats: row,
+    byClass,
+    thresholds: {
+      priorityA: PRIORITY_A_THRESHOLD,
+      similar: SIMILAR_THRESHOLD,
+      changed: CHANGED_THRESHOLD,
+    },
+  });
 });

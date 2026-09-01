@@ -10,12 +10,16 @@ export interface MapMarker {
 
 export type Basemap = "satellite" | "streets";
 
+/** How mesh cells are coloured: by class, or as a heatmap of one measure. */
+export type MeshColorMode = "class" | "similarity" | "change";
+
 export interface CellProperties {
   cellClass: string;
   label: string;
   color: string;
   similarity: number | null;
   change: number | null;
+  ndvi?: number | null;
   fieldRecords: number;
   hotspotId: string | null;
 }
@@ -26,26 +30,39 @@ interface MapViewProps {
   markers?: MapMarker[];
   className?: string;
   basemap?: Basemap;
-  /** FeatureCollection of mesh cells; each feature carries a `color` property. */
   mesh?: GeoJSON.FeatureCollection | null;
   meshVisible?: boolean;
   meshOpacity?: number;
-  /** Draws the cell borders that make the 10m grid readable as a grid. */
+  meshColorMode?: MeshColorMode;
   gridVisible?: boolean;
   labelsVisible?: boolean;
   onCellClick?: (props: CellProperties) => void;
+  /** Emits the clicked point when picking a location rather than reading one. */
+  onMapClick?: (lat: number, lng: number) => void;
   fitBounds?: [[number, number], [number, number]] | null;
+  maxFitZoom?: number;
 }
 
-// Raster basemaps, both keyless. Imagery is what makes the 10m mesh legible as
-// ground rather than as abstract squares, so it is the default for mesh views.
+// Imagery: GSI (Geospatial Information Authority of Japan) seamless photo is
+// the sharpest keyless source over Japan and is the product's home ground, so
+// it sits on top; Esri World Imagery renders underneath it and shows through
+// anywhere GSI has no coverage (i.e. outside Japan). Esri alone was returning
+// "Map data not yet available" placeholder tiles at mesh zoom levels, which is
+// what painted the mesh screen grey.
 const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
-  satellite: {
+  esri: {
     type: "raster",
     tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
     tileSize: 256,
-    maxzoom: 19,
+    maxzoom: 18,
     attribution: "Esri, Maxar, Earthstar Geographics",
+  },
+  gsi: {
+    type: "raster",
+    tiles: ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"],
+    tileSize: 256,
+    maxzoom: 18,
+    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
   },
   streets: {
     type: "raster",
@@ -54,14 +71,13 @@ const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
     maxzoom: 19,
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   },
-  // Place names and boundaries drawn over imagery; transparent elsewhere.
   labels: {
     type: "raster",
     tiles: [
       "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     ],
     tileSize: 256,
-    maxzoom: 19,
+    maxzoom: 18,
     attribution: "Esri",
   },
 };
@@ -71,13 +87,38 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
   sources: SOURCES,
   layers: [
     { id: "streets", type: "raster", source: "streets", layout: { visibility: "none" } },
-    { id: "satellite", type: "raster", source: "satellite" },
-    { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.9 } },
+    { id: "esri", type: "raster", source: "esri" },
+    { id: "gsi", type: "raster", source: "gsi" },
+    { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.85 } },
   ],
 };
 
 const MESH_SOURCE = "mesh";
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+// Heatmap ramps. Similarity runs pale→green (more like confirmed habitat is
+// better); change runs pale→red (more change needs more attention). A missing
+// value falls back to grey rather than to an end of the ramp, so "no data"
+// never reads as "zero".
+const SIMILARITY_RAMP: maplibregl.DataDrivenPropertyValueSpecification<string> = [
+  "case",
+  ["==", ["get", "similarity"], null],
+  "#9ca3af",
+  ["interpolate", ["linear"], ["to-number", ["get", "similarity"], -1], 0, "#f1f8f4", 0.5, "#96ccae", 0.85, "#2f9e63", 1, "#0f5132"],
+] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
+
+const CHANGE_RAMP: maplibregl.DataDrivenPropertyValueSpecification<string> = [
+  "case",
+  ["==", ["get", "change"], null],
+  "#9ca3af",
+  ["interpolate", ["linear"], ["to-number", ["get", "change"], -1], 0, "#fdf5f3", 0.05, "#f0b8a8", 0.15, "#d4623f", 0.3, "#8c2c14"],
+] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
+
+function fillColor(mode: MeshColorMode): maplibregl.DataDrivenPropertyValueSpecification<string> {
+  if (mode === "similarity") return SIMILARITY_RAMP;
+  if (mode === "change") return CHANGE_RAMP;
+  return ["get", "color"] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
+}
 
 export default function MapView({
   center,
@@ -88,17 +129,22 @@ export default function MapView({
   mesh = null,
   meshVisible = true,
   meshOpacity = 0.55,
+  meshColorMode = "class",
   gridVisible = true,
   labelsVisible = true,
   onCellClick,
+  onMapClick,
   fitBounds = null,
+  maxFitZoom = 18,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRefs = useRef<maplibregl.Marker[]>([]);
   const readyRef = useRef(false);
   const onCellClickRef = useRef(onCellClick);
+  const onMapClickRef = useRef(onMapClick);
   onCellClickRef.current = onCellClick;
+  onMapClickRef.current = onMapClick;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -108,6 +154,9 @@ export default function MapView({
       style: BASE_STYLE,
       center: [center[1], center[0]],
       zoom,
+      // Imagery tops out at z18; allowing more just scales tiles up and invites
+      // requests for levels the providers do not serve.
+      maxZoom: 19,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -120,7 +169,7 @@ export default function MapView({
         id: "mesh-fill",
         type: "fill",
         source: MESH_SOURCE,
-        paint: { "fill-color": ["get", "color"], "fill-opacity": meshOpacity },
+        paint: { "fill-color": fillColor(meshColorMode), "fill-opacity": meshOpacity },
       });
       map.addLayer({
         id: "mesh-outline",
@@ -141,6 +190,10 @@ export default function MapView({
       map.on("mouseleave", "mesh-fill", () => (map.getCanvas().style.cursor = ""));
     });
 
+    map.on("click", (e) => {
+      if (onMapClickRef.current) onMapClickRef.current(e.lngLat.lat, e.lngLat.lng);
+    });
+
     // A container laid out (or resized) after init otherwise leaves the canvas
     // at a stale size and paints blank.
     const observer = new ResizeObserver(() => map.resize());
@@ -159,15 +212,13 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
-      map.setLayoutProperty("satellite", "visibility", basemap === "satellite" ? "visible" : "none");
-      map.setLayoutProperty("streets", "visibility", basemap === "streets" ? "visible" : "none");
-      // Imagery has no place names of its own, so the label layer only earns
-      // its place over satellite.
-      map.setLayoutProperty(
-        "labels",
-        "visibility",
-        labelsVisible && basemap === "satellite" ? "visible" : "none",
-      );
+      const imagery = basemap === "satellite";
+      map.setLayoutProperty("esri", "visibility", imagery ? "visible" : "none");
+      map.setLayoutProperty("gsi", "visibility", imagery ? "visible" : "none");
+      map.setLayoutProperty("streets", "visibility", imagery ? "none" : "visible");
+      // Imagery carries no place names of its own, so labels only earn their
+      // place over it.
+      map.setLayoutProperty("labels", "visibility", labelsVisible && imagery ? "visible" : "none");
     };
     if (map.isStyleLoaded()) apply();
     else map.once("load", apply);
@@ -183,21 +234,22 @@ export default function MapView({
       map.setLayoutProperty("mesh-fill", "visibility", meshVisible ? "visible" : "none");
       map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible ? "visible" : "none");
       map.setPaintProperty("mesh-fill", "fill-opacity", meshOpacity);
+      map.setPaintProperty("mesh-fill", "fill-color", fillColor(meshColorMode));
     };
     if (readyRef.current) apply();
     else map.once("load", apply);
-  }, [mesh, meshVisible, meshOpacity, gridVisible]);
+  }, [mesh, meshVisible, meshOpacity, gridVisible, meshColorMode]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (fitBounds) {
-      map.fitBounds(fitBounds, { padding: 40, duration: 600, maxZoom: 18 });
+      map.fitBounds(fitBounds, { padding: 40, duration: 600, maxZoom: maxFitZoom });
       return;
     }
     map.setCenter([center[1], center[0]]);
     map.setZoom(zoom);
-  }, [center, zoom, fitBounds]);
+  }, [center, zoom, fitBounds, maxFitZoom]);
 
   useEffect(() => {
     const map = mapRef.current;

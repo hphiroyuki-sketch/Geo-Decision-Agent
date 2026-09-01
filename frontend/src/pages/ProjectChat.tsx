@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera, Grid3x3 } from "lucide-react";
+import { BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera, Grid3x3 } from "lucide-react";
 import { api, streamChat } from "../lib/api";
 import MapView, { type MapMarker } from "../components/MapView";
+import ChatInput from "../components/ChatInput";
 
 interface ProjectDetail {
   id: string;
@@ -211,22 +212,13 @@ export default function ProjectChat() {
             </>
           )}
         </div>
-        <div className="p-3 border-t border-slate-100 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-            placeholder="追加条件を入力してください"
-            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--gda-green)]"
-          />
-          <button
-            onClick={send}
-            disabled={sending || !input.trim()}
-            className="bg-[var(--gda-navy)] disabled:opacity-40 text-white rounded-lg px-3 flex items-center justify-center"
-          >
-            <Send size={16} />
-          </button>
-        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSend={send}
+          disabled={sending}
+          placeholder="調査したい内容や追加条件を入力（音声入力も使えます）"
+        />
       </div>
       <div className={`${mobileView === "map" ? "block" : "hidden"} md:block relative flex-1 min-h-0`}>
         <div className="absolute top-3 left-3 z-10 bg-white/95 rounded-lg shadow-sm px-3 py-2 text-xs text-slate-600">
