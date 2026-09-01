@@ -15,7 +15,31 @@ interface MapViewProps {
   className?: string;
 }
 
-const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+// Raster basemap defined inline rather than fetching a hosted style.json.
+// The previous CARTO vector style loaded its metadata fine (attribution and
+// controls rendered) but painted nothing - its vector tile endpoint is the
+// part that now needs an API key. Raster tiles from OSM need no key, so the
+// map has no external style/key dependency at all.
+//
+// NOTE: OSM's tile policy is meant for modest traffic. Before selling this,
+// move to a paid tile plan (MapTiler / CARTO with key / Mapbox) and just
+// swap TILE_URL + TILE_ATTRIBUTION below.
+const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+const BASEMAP_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    basemap: {
+      type: "raster",
+      tiles: [TILE_URL],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: TILE_ATTRIBUTION,
+    },
+  },
+  layers: [{ id: "basemap", type: "raster", source: "basemap" }],
+};
 
 export default function MapView({ center, zoom = 6, markers = [], className }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -24,8 +48,9 @@ export default function MapView({ center, zoom = 6, markers = [], className }: M
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const container = containerRef.current;
     const map = new maplibregl.Map({
-      container: containerRef.current,
+      container,
       style: BASEMAP_STYLE,
       center: [center[1], center[0]],
       zoom,
@@ -33,7 +58,16 @@ export default function MapView({ center, zoom = 6, markers = [], className }: M
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
+
+    // If the container is laid out (or resized) after the map initialises, the
+    // canvas keeps its stale size and paints blank while the DOM controls still
+    // position correctly - so keep the canvas in sync with the container.
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(container);
+    map.once("load", () => map.resize());
+
     return () => {
+      observer.disconnect();
       map.remove();
       mapRef.current = null;
     };

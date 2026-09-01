@@ -3,10 +3,69 @@ import type { Env, AuthUser } from "../types";
 import { newId, newInviteCode } from "../lib/crypto";
 import { getSetting, setSetting, logAudit, currentMonthKey } from "../lib/db";
 import { getBudgetStatus } from "../lib/pricing";
+import { parseServiceAccountKey, getGoogleAccessToken } from "../lib/googleAuth";
+import { fetchEmbeddingVector } from "../lib/earthEngine";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
 export const adminRoutes = new Hono<AppEnv>();
+
+/**
+ * Earth Engine connectivity check. Reports each stage separately (secret
+ * present -> key parses -> OAuth token -> actual EE call) with the raw
+ * upstream error text, so a failure names itself instead of silently
+ * falling back to simulated values inside the analysis flow.
+ * Never returns key material - only the service account's email and errors.
+ */
+adminRoutes.get("/ee-test", async (c) => {
+  const lat = Number(c.req.query("lat") ?? "35.6812");
+  const lng = Number(c.req.query("lng") ?? "139.7671");
+  const year = Number(c.req.query("year") ?? (await getSetting(c.env.DB, "earth_engine_year", "2024")));
+
+  const result: Record<string, unknown> = { lat, lng, year };
+
+  if (!c.env.EE_SERVICE_ACCOUNT_JSON) {
+    result.stage = "secret_missing";
+    result.message = "EE_SERVICE_ACCOUNT_JSON が Worker に設定されていません。";
+    return c.json(result);
+  }
+  result.secretPresent = true;
+
+  let key;
+  try {
+    key = parseServiceAccountKey(c.env.EE_SERVICE_ACCOUNT_JSON);
+    result.clientEmail = key.client_email;
+    result.projectId = c.env.EE_PROJECT_ID || key.project_id;
+  } catch (err) {
+    result.stage = "key_parse_failed";
+    result.message = err instanceof Error ? err.message : String(err);
+    return c.json(result);
+  }
+
+  try {
+    const token = await getGoogleAccessToken(key, [
+      "https://www.googleapis.com/auth/earthengine.readonly",
+      "https://www.googleapis.com/auth/cloud-platform.read-only",
+    ]);
+    result.oauthOk = token.length > 0;
+  } catch (err) {
+    result.stage = "oauth_failed";
+    result.message = err instanceof Error ? err.message : String(err);
+    return c.json(result);
+  }
+
+  try {
+    const { vector } = await fetchEmbeddingVector(c.env.EE_SERVICE_ACCOUNT_JSON, c.env.EE_PROJECT_ID, lat, lng, year);
+    result.stage = "ok";
+    result.vectorLength = vector.length;
+    result.sample = vector.slice(0, 4);
+  } catch (err) {
+    result.stage = "earth_engine_call_failed";
+    result.message = err instanceof Error ? err.message : String(err);
+  }
+
+  return c.json(result);
+});
 
 adminRoutes.get("/invites", async (c) => {
   const { results } = await c.env.DB.prepare(

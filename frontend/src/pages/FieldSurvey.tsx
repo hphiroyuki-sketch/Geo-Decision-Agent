@@ -40,6 +40,7 @@ export default function FieldSurvey() {
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [manualCoords, setManualCoords] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -68,6 +69,21 @@ export default function FieldSurvey() {
       },
       { enableHighAccuracy: true, timeout: 15000 },
     );
+  };
+
+  const applyManualCoords = () => {
+    setLocationError(null);
+    const parts = manualCoords.split(/[,\s]+/).filter(Boolean).map(Number);
+    if (parts.length !== 2 || parts.some((n) => Number.isNaN(n))) {
+      setLocationError("「緯度, 経度」の形式で入力してください（例: 34.723083, 135.502149）。");
+      return;
+    }
+    const [lat, lng] = parts;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setLocationError("緯度は-90〜90、経度は-180〜180の範囲で入力してください。");
+      return;
+    }
+    setCoords({ lat, lng, accuracy: 0 });
   };
 
   const onPhotoSelected = (file: File | null) => {
@@ -155,19 +171,42 @@ export default function FieldSurvey() {
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1.5">位置情報</label>
           {coords ? (
-            <div className="flex items-center gap-2 text-sm text-slate-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-              <MapPin size={16} className="text-green-700" />
-              {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}（精度 ±{coords.accuracy.toFixed(0)}m）
+            <div className="flex items-center justify-between gap-2 text-sm text-slate-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <span className="flex items-center gap-2">
+                <MapPin size={16} className="text-green-700" />
+                {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+                {coords.accuracy > 0 ? `（精度 ±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
+              </span>
+              <button onClick={() => setCoords(null)} className="text-xs text-slate-500 underline shrink-0">
+                変更
+              </button>
             </div>
           ) : (
-            <button
-              onClick={captureLocation}
-              disabled={locating}
-              className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg px-3 py-2"
-            >
-              {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
-              {locating ? "取得中..." : "現在地を取得"}
-            </button>
+            <div className="space-y-2">
+              <button
+                onClick={captureLocation}
+                disabled={locating}
+                className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg px-3 py-2"
+              >
+                {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+                {locating ? "取得中..." : "現在地を取得"}
+              </button>
+              <div className="flex gap-2">
+                <input
+                  value={manualCoords}
+                  onChange={(e) => setManualCoords(e.target.value)}
+                  placeholder="または緯度, 経度を入力（例: 34.723083, 135.502149）"
+                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--gda-green)]"
+                  onKeyDown={(e) => e.key === "Enter" && applyManualCoords()}
+                />
+                <button
+                  onClick={applyManualCoords}
+                  className="text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-3 shrink-0"
+                >
+                  設定
+                </button>
+              </div>
+            </div>
           )}
           {locationError && <p className="text-xs text-red-600 mt-1.5">{locationError}</p>}
         </div>
