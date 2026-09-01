@@ -6,7 +6,13 @@ import { getSetting, currentMonthKey } from "../lib/db";
 import { estimateCostUsd, getBudgetStatus } from "../lib/pricing";
 import { makeClient, buildSystemPrompt, ANALYZE_TOOL } from "../lib/anthropicClient";
 import { analyzeCandidates, type CandidateInput, type RealDataOverride } from "../lib/geoEngine";
-import { getEmbeddingVector, getReferenceEmbedding, findNearbyFieldRecords, cosineSimilarity } from "../lib/fieldData";
+import {
+  getEmbeddingVector,
+  getReferenceEmbedding,
+  findNearbyFieldRecords,
+  distanceToNearestReferencePointM,
+  cosineSimilarity,
+} from "../lib/fieldData";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -153,13 +159,21 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                   if (cand.lat != null && cand.lng != null) {
                     const nearby = await findNearbyFieldRecords(c.env.DB, conversation.project_id, cand.lat, cand.lng);
                     override.fieldRecordsCount = nearby.length;
+                    override.confirmedFieldRecordsCount = nearby.filter((n) => n.review_status === "confirmed").length;
                     const species = nearby.map((n) => n.species_guess).filter((s): s is string => !!s);
                     if (species.length) override.fieldSpeciesNames = [...new Set(species)];
 
                     if (referenceEmbedding) {
                       const candVector = await getEmbeddingVector(c.env, c.env.DB, cand.lat, cand.lng, year);
                       if (candVector) {
-                        override.alphaEarthSimilarity = Number(cosineSimilarity(candVector, referenceEmbedding).toFixed(3));
+                        override.alphaEarthSimilarity = Number(
+                          cosineSimilarity(candVector, referenceEmbedding.vector).toFixed(3),
+                        );
+                        override.referenceDistanceM = distanceToNearestReferencePointM(
+                          cand.lat,
+                          cand.lng,
+                          referenceEmbedding.points,
+                        );
                       }
                     }
                   }

@@ -23,7 +23,11 @@ export interface CandidateInput {
 export interface RealDataOverride {
   alphaEarthSimilarity?: number;
   fieldRecordsCount?: number;
+  /** Of fieldRecordsCount, how many a reviewer actually confirmed. */
+  confirmedFieldRecordsCount?: number;
   fieldSpeciesNames?: string[];
+  /** Metres from this candidate to the nearest confirmed record behind the reference embedding. */
+  referenceDistanceM?: number;
 }
 
 export interface MitigationMeasure {
@@ -119,13 +123,26 @@ export function analyzeCandidates(
     const score = Math.round(clamp(100 - riskScore, 5, 97));
 
     const evidenceBasis = [override.alphaEarthSimilarity !== undefined ? "Earth Engine実データ" : "衛星推定"];
+    // Only a reviewer-confirmed record earns "confirmed". Counting unreviewed
+    // records as confirmed overstated the evidence in a document meant to
+    // support a real siting decision.
+    const confirmedCount = override.confirmedFieldRecordsCount ?? fieldRecordsCount;
+    const unconfirmedCount = Math.max(0, fieldRecordsCount - confirmedCount);
     let confidence: "高" | "中" | "低" = "低";
-    if (fieldRecordsCount >= 3) {
+    if (confirmedCount >= 3) {
       evidenceBasis.push("現地確認済み");
       confidence = "高";
-    } else if (fieldRecordsCount >= 1) {
+    } else if (confirmedCount >= 1) {
       evidenceBasis.push("現地確認済み");
       confidence = "中";
+    }
+    if (unconfirmedCount > 0) {
+      evidenceBasis.push(`現地記録${unconfirmedCount}件（未確認・レビュー待ち）`);
+    }
+    // Similarity to the reference is partly just proximity to it, so state the
+    // distance rather than letting a high score read as independent evidence.
+    if (override.referenceDistanceM !== undefined) {
+      evidenceBasis.push(`基準地点まで約${Math.round(override.referenceDistanceM)}m`);
     }
     if (override.fieldSpeciesNames?.length) {
       evidenceBasis.push(`現地記録種: ${override.fieldSpeciesNames.slice(0, 3).join("・")}`);

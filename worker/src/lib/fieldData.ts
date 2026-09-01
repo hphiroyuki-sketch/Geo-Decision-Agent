@@ -37,7 +37,8 @@ export async function findNearbyFieldRecords(
   const { results } = await db
     .prepare(
       `SELECT lat, lng, species_guess, review_status FROM field_records
-       WHERE project_id = ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`,
+       WHERE project_id = ? AND review_status != 'rejected'
+         AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`,
     )
     .bind(projectId, lat - degPad, lat + degPad, lng - degPad, lng + degPad)
     .all<NearbyFieldRecord>();
@@ -82,13 +83,24 @@ export async function getEmbeddingVector(env: Env, db: D1Database, lat: number, 
   }
 }
 
+export interface ReferenceEmbedding {
+  vector: number[];
+  /** The confirmed record locations the vector was averaged from. */
+  points: { lat: number; lng: number }[];
+}
+
 /**
  * Builds a "known good habitat" reference embedding by averaging the vectors
  * at confirmed field_records locations in this project. Returns null if
  * there are no confirmed records yet (nothing to compare candidates against),
  * or if Earth Engine isn't configured.
  */
-export async function getReferenceEmbedding(env: Env, db: D1Database, projectId: string, year: number): Promise<number[] | null> {
+export async function getReferenceEmbedding(
+  env: Env,
+  db: D1Database,
+  projectId: string,
+  year: number,
+): Promise<ReferenceEmbedding | null> {
   if (!env.EE_SERVICE_ACCOUNT_JSON) return null;
   const { results } = await db
     .prepare(
@@ -99,16 +111,30 @@ export async function getReferenceEmbedding(env: Env, db: D1Database, projectId:
   if (results.length === 0) return null;
 
   const vectors: number[][] = [];
+  const points: { lat: number; lng: number }[] = [];
   for (const r of results) {
     const v = await getEmbeddingVector(env, db, r.lat, r.lng, year);
-    if (v) vectors.push(v);
+    if (v) {
+      vectors.push(v);
+      points.push({ lat: r.lat, lng: r.lng });
+    }
   }
   if (vectors.length === 0) return null;
 
   const dims = vectors[0].length;
   const avg = new Array(dims).fill(0);
   for (const v of vectors) for (let i = 0; i < dims; i++) avg[i] += v[i] / vectors.length;
-  return avg;
+  return { vector: avg, points };
+}
+
+/** Metres from a candidate to the nearest point the reference was built from. */
+export function distanceToNearestReferencePointM(
+  lat: number,
+  lng: number,
+  points: { lat: number; lng: number }[],
+): number | undefined {
+  if (points.length === 0) return undefined;
+  return Math.min(...points.map((p) => haversineKm(lat, lng, p.lat, p.lng))) * 1000;
 }
 
 export { cosineSimilarity };
