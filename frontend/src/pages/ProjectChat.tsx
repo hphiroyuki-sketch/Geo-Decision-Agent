@@ -127,7 +127,7 @@ export default function ProjectChat() {
   ];
 
   return (
-    <div className="flex flex-col md:flex-row h-full">
+    <div className="flex flex-col md:flex-row h-[calc(100vh-3.5rem-4rem)] md:h-screen">
       <div className="md:hidden flex border-b border-slate-200 bg-white">
         <button
           onClick={() => setMobileView("chat")}
