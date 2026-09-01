@@ -71,7 +71,7 @@ export default function Admin() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-lg font-semibold text-slate-800">管理設定</h1>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -98,7 +98,7 @@ export default function Admin() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <div className="text-xs text-slate-500 mb-2">過去の月別コスト（円）</div>
             <div className="h-48">
@@ -130,7 +130,7 @@ export default function Admin() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
         <div className="font-medium text-sm text-slate-800 mb-3">予算設定</div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="text-xs text-slate-500">月間上限（円）</label>
           <input
             type="number"
@@ -147,7 +147,7 @@ export default function Admin() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
         <div className="font-medium text-sm text-slate-800 mb-3">招待コードの発行</div>
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
           <input
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
@@ -178,7 +178,8 @@ export default function Admin() {
             </button>
           </div>
         )}
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[480px]">
           <thead>
             <tr className="text-slate-500 border-b border-slate-100">
               <th className="text-left py-2">コード</th>
@@ -206,6 +207,7 @@ export default function Admin() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

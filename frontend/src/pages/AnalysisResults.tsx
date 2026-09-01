@@ -65,7 +65,7 @@ export default function AnalysisResults() {
   }, [id]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="text-xs text-slate-400">分析結果</div>
@@ -78,8 +78,8 @@ export default function AnalysisResults() {
           まだ分析結果がありません。AI調査チャットで候補地の比較を依頼してください。
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-[420px]">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-64 sm:h-[420px]">
             <MapView
               center={projectCenter}
               zoom={11}
@@ -133,7 +133,7 @@ export default function AnalysisResults() {
             ))}
           </div>
 
-          <div className="col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+          <div className="col-span-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500">

@@ -94,8 +94,8 @@ export default function DecisionReport() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto print:p-0">
-      <div className="flex items-center justify-between mb-4 print:hidden">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto print:p-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 print:hidden">
         <h1 className="text-lg font-semibold text-slate-800">意思決定レポート</h1>
         <div className="flex gap-2">
           <button
@@ -117,9 +117,9 @@ export default function DecisionReport() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-4">
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-6 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+          <div className="sm:col-span-2">
             <h2 className="text-xl font-semibold text-slate-800 mb-3">{report.title}</h2>
             <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 leading-relaxed">
               <div className="text-xs font-medium text-slate-500 mb-1">エグゼクティブサマリー</div>
@@ -137,7 +137,7 @@ export default function DecisionReport() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="text-xs font-medium text-slate-500 mb-3">根拠の状態</div>
           <div className="space-y-2 text-sm">
@@ -156,7 +156,7 @@ export default function DecisionReport() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 col-span-2">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:col-span-2">
           <div className="text-xs font-medium text-slate-500 mb-3">推奨アクション</div>
           <div className="space-y-2">
             {candidates.slice(0, 3).map((c) => (

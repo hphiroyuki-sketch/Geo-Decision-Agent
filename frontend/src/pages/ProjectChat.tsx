@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Send, BarChart3, FileText, Satellite } from "lucide-react";
+import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon } from "lucide-react";
 import { api, streamChat } from "../lib/api";
 import MapView, { type MapMarker } from "../components/MapView";
 
@@ -47,6 +47,7 @@ export default function ProjectChat() {
   const [sending, setSending] = useState(false);
   const [stepLabel, setStepLabel] = useState<string | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState<"chat" | "map">("chat");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -113,9 +114,29 @@ export default function ProjectChat() {
     .map((c) => ({ lat: c.lat as number, lng: c.lng as number, label: `${c.label} (score ${c.score})`, color: scoreColor(c.score) }));
 
   return (
-    <div className="flex h-screen">
-      <div className="w-[420px] shrink-0 border-r border-slate-200 bg-white flex flex-col">
-        <div className="px-4 py-3 border-b border-slate-100">
+    <div className="flex flex-col md:flex-row h-full">
+      <div className="md:hidden flex border-b border-slate-200 bg-white">
+        <button
+          onClick={() => setMobileView("chat")}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
+            mobileView === "chat" ? "border-[var(--gda-green)] text-[var(--gda-green)]" : "border-transparent text-slate-400"
+          }`}
+        >
+          <MessageSquare size={14} /> 会話
+        </button>
+        <button
+          onClick={() => setMobileView("map")}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
+            mobileView === "map" ? "border-[var(--gda-green)] text-[var(--gda-green)]" : "border-transparent text-slate-400"
+          }`}
+        >
+          <MapIcon size={14} /> 地図
+        </button>
+      </div>
+      <div
+        className={`${mobileView === "chat" ? "flex" : "hidden"} md:flex w-full md:w-[420px] md:shrink-0 border-r border-slate-200 bg-white flex-col flex-1 md:flex-none min-h-0`}
+      >
+        <div className="hidden md:block px-4 py-3 border-b border-slate-100">
           <div className="text-xs text-slate-400 mb-0.5">AI調査</div>
           <div className="font-medium text-slate-800 text-sm">{project?.name ?? "読み込み中..."}</div>
         </div>
@@ -180,7 +201,7 @@ export default function ProjectChat() {
           </button>
         </div>
       </div>
-      <div className="flex-1 relative">
+      <div className={`${mobileView === "map" ? "block" : "hidden"} md:block relative flex-1 min-h-0`}>
         <div className="absolute top-3 left-3 z-10 bg-white/95 rounded-lg shadow-sm px-3 py-2 text-xs text-slate-600">
           {project?.area_ha ? `面積: ${project.area_ha.toLocaleString()} ha　` : ""}
           {project?.elevation_min != null && project?.elevation_max != null
