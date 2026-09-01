@@ -2,7 +2,11 @@ import type { Env } from "../types";
 import { newId } from "./crypto";
 import { fetchEmbeddingVector, cosineSimilarity } from "./earthEngine";
 
-const NEARBY_RADIUS_KM = 0.5;
+// A site candidate covers tens to hundreds of hectares, and a field observation
+// is a single point somewhere in or near it, so 500m was tight enough that real
+// records next to a candidate still counted as zero. 2km keeps observations
+// tied to the candidate they belong to while actually connecting the two.
+const NEARBY_RADIUS_KM = 2;
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;

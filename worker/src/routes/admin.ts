@@ -18,6 +18,9 @@ export const adminRoutes = new Hono<AppEnv>();
  * Never returns key material - only the service account's email and errors.
  */
 adminRoutes.get("/ee-test", async (c) => {
+  // Opened straight in a browser, so keep a stale result from being served
+  // back as if it were a fresh diagnosis.
+  c.header("cache-control", "no-store");
   const lat = Number(c.req.query("lat") ?? "35.6812");
   const lng = Number(c.req.query("lng") ?? "139.7671");
   const year = Number(c.req.query("year") ?? (await getSetting(c.env.DB, "earth_engine_year", "2024")));
@@ -79,6 +82,7 @@ adminRoutes.get("/ee-test", async (c) => {
  * really called" directly instead of by trial and redeploy.
  */
 adminRoutes.get("/ee-algorithms", async (c) => {
+  c.header("cache-control", "no-store");
   const q = c.req.query("q") ?? "";
   if (!c.env.EE_SERVICE_ACCOUNT_JSON) {
     return c.json({ error: "EE_SERVICE_ACCOUNT_JSON が Worker に設定されていません。" }, 400);

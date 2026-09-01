@@ -56,23 +56,19 @@ function buildPointSampleExpression(lat: number, lng: number, year: number, opts
       arguments: { id: { constantValue: SATELLITE_EMBEDDING_COLLECTION } },
     },
   };
-  // Date filtering goes through the generic Collection.filter with a date-range
-  // filter: "filterDate" is client-library sugar, not a server-side algorithm
-  // (the API rejects it with `Unknown function: 'Collection.filterDate'`).
+  // "filterDate" is client-library sugar, not a server-side algorithm (the API
+  // rejects it with `Unknown function: 'Collection.filterDate'`), so filtering
+  // goes through the generic Collection.filter. Filter.calendarRange on the
+  // year field suits this collection exactly - it is annual, one image per
+  // year - and needs no date-range object, keeping the graph to algorithms
+  // confirmed present in this project's algorithm list.
   const dateFilter: EeValue = {
     functionInvocationValue: {
-      functionName: "Filter.dateRangeContains",
+      functionName: "Filter.calendarRange",
       arguments: {
-        leftValue: {
-          functionInvocationValue: {
-            functionName: "DateRange",
-            arguments: {
-              start: { constantValue: `${year}-01-01` },
-              end: { constantValue: `${year + 1}-01-01` },
-            },
-          },
-        },
-        rightField: { constantValue: "system:time_start" },
+        start: { constantValue: year },
+        end: { constantValue: year },
+        field: { constantValue: "year" },
       },
     },
   };
