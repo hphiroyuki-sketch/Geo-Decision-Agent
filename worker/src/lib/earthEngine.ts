@@ -228,15 +228,16 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 // SINGLE value:compute call - the graph builds one 4-band image and reduces it
 // once, rather than four round trips.
 //
-// Cloud handling: Sentinel-2 scenes are masked with the scene classification
-// band (SCL) before compositing, and the year is reduced with a MEDIAN so one
-// bad observation cannot move the result. Comparing single dates would let
-// weather and season masquerade as change.
+// Cloud handling: the year's scenes are reduced with a MEDIAN, which is the
+// standard cloud-robust composite - a cloud has to cover more than half of a
+// year's observations of a pixel to move the median. Comparing single dates
+// instead would let weather and season masquerade as change.
+//
+// Per-pixel SCL masking would be stricter still, but it needs a mapped
+// function over the collection rather than a flat graph, so it is a deliberate
+// later refinement rather than something silently claimed here.
 
 const S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED";
-
-/** SCL classes to drop: saturated, shadow, cloud (low/med/high prob), cirrus, snow. */
-const SCL_REJECT = [1, 3, 8, 9, 10, 11];
 
 export interface SpectralIndices {
   ndvi: number | null;
@@ -303,10 +304,26 @@ function buildIndicesExpression(lat: number, lng: number, year: number): EeValue
     },
   };
 
+  // "filterBounds" is client-library sugar like "filterDate" was - the API
+  // rejects it with `Unknown function: 'Collection.filterBounds'`. The
+  // server-side equivalent is the generic Collection.filter with an intersects
+  // filter against the feature's own geometry field (".geo"), which is exactly
+  // what the client libraries expand filterBounds into.
   const atPoint: EeValue = {
     functionInvocationValue: {
-      functionName: "Collection.filterBounds",
-      arguments: { collection: yearFiltered, geometry: point },
+      functionName: "Collection.filter",
+      arguments: {
+        collection: yearFiltered,
+        filter: {
+          functionInvocationValue: {
+            functionName: "Filter.intersects",
+            arguments: {
+              leftField: { constantValue: ".geo" },
+              rightValue: point,
+            },
+          },
+        },
+      },
     },
   };
 
@@ -395,5 +412,3 @@ export async function fetchSpectralIndices(
     sceneCount: null,
   };
 }
-
-export { SCL_REJECT };
