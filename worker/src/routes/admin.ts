@@ -4,7 +4,7 @@ import { newId, newInviteCode } from "../lib/crypto";
 import { getSetting, setSetting, logAudit, currentMonthKey } from "../lib/db";
 import { getBudgetStatus } from "../lib/pricing";
 import { parseServiceAccountKey, getGoogleAccessToken } from "../lib/googleAuth";
-import { fetchEmbeddingVector } from "../lib/earthEngine";
+import { fetchEmbeddingVector, listAlgorithms } from "../lib/earthEngine";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -54,8 +54,13 @@ adminRoutes.get("/ee-test", async (c) => {
     return c.json(result);
   }
 
+  const skipDateFilter = c.req.query("nofilter") === "1";
+  result.skipDateFilter = skipDateFilter;
+
   try {
-    const { vector } = await fetchEmbeddingVector(c.env.EE_SERVICE_ACCOUNT_JSON, c.env.EE_PROJECT_ID, lat, lng, year);
+    const { vector } = await fetchEmbeddingVector(c.env.EE_SERVICE_ACCOUNT_JSON, c.env.EE_PROJECT_ID, lat, lng, year, {
+      skipDateFilter,
+    });
     result.stage = "ok";
     result.vectorLength = vector.length;
     result.sample = vector.slice(0, 4);
@@ -65,6 +70,25 @@ adminRoutes.get("/ee-test", async (c) => {
   }
 
   return c.json(result);
+});
+
+/**
+ * Lists the Earth Engine algorithms whose names contain ?q=. The expression
+ * graph must name server-side algorithms exactly, and those names differ from
+ * the client libraries' method names, so this answers "what is this operation
+ * really called" directly instead of by trial and redeploy.
+ */
+adminRoutes.get("/ee-algorithms", async (c) => {
+  const q = c.req.query("q") ?? "";
+  if (!c.env.EE_SERVICE_ACCOUNT_JSON) {
+    return c.json({ error: "EE_SERVICE_ACCOUNT_JSON が Worker に設定されていません。" }, 400);
+  }
+  try {
+    const { total, matches } = await listAlgorithms(c.env.EE_SERVICE_ACCOUNT_JSON, c.env.EE_PROJECT_ID, q);
+    return c.json({ query: q, totalAlgorithms: total, matchCount: matches.length, matches });
+  } catch (err) {
+    return c.json({ query: q, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });
 
 adminRoutes.get("/invites", async (c) => {

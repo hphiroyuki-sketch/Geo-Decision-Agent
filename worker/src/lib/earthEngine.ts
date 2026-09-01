@@ -40,25 +40,53 @@ function asExpression(root: EeValue): EeExpression {
   return { values: { [ROOT_NODE]: root }, result: ROOT_NODE };
 }
 
-function buildPointSampleExpression(lat: number, lng: number, year: number): EeValue {
+export interface SampleOptions {
+  /**
+   * Skip the date filter and mosaic the whole collection. Diagnostic escape
+   * hatch: it isolates whether a failure is in the date filtering or in the
+   * rest of the graph, without needing a separate deploy to find out.
+   */
+  skipDateFilter?: boolean;
+}
+
+function buildPointSampleExpression(lat: number, lng: number, year: number, opts: SampleOptions = {}): EeValue {
   const collection: EeValue = {
     functionInvocationValue: {
       functionName: "ImageCollection.load",
       arguments: { id: { constantValue: SATELLITE_EMBEDDING_COLLECTION } },
     },
   };
-  const filtered: EeValue = {
+  // Date filtering goes through the generic Collection.filter with a date-range
+  // filter: "filterDate" is client-library sugar, not a server-side algorithm
+  // (the API rejects it with `Unknown function: 'Collection.filterDate'`).
+  const dateFilter: EeValue = {
     functionInvocationValue: {
-      functionName: "Collection.filterDate",
+      functionName: "Filter.dateRangeContains",
       arguments: {
-        collection,
-        start: { constantValue: `${year}-01-01` },
-        end: { constantValue: `${year + 1}-01-01` },
+        leftValue: {
+          functionInvocationValue: {
+            functionName: "DateRange",
+            arguments: {
+              start: { constantValue: `${year}-01-01` },
+              end: { constantValue: `${year + 1}-01-01` },
+            },
+          },
+        },
+        rightField: { constantValue: "system:time_start" },
       },
     },
   };
+  const filtered: EeValue = {
+    functionInvocationValue: {
+      functionName: "Collection.filter",
+      arguments: { collection, filter: dateFilter },
+    },
+  };
   const mosaicked: EeValue = {
-    functionInvocationValue: { functionName: "ImageCollection.mosaic", arguments: { collection: filtered } },
+    functionInvocationValue: {
+      functionName: "ImageCollection.mosaic",
+      arguments: { collection: opts.skipDateFilter ? collection : filtered },
+    },
   };
   const point: EeValue = {
     functionInvocationValue: {
@@ -93,12 +121,13 @@ export async function fetchEmbeddingVector(
   lat: number,
   lng: number,
   year: number,
+  opts: SampleOptions = {},
 ): Promise<EmbeddingResult> {
   const key: ServiceAccountKey = parseServiceAccountKey(serviceAccountJson);
   const project = projectId || key.project_id;
   const accessToken = await getGoogleAccessToken(key, EE_SCOPES);
 
-  const body = { expression: asExpression(buildPointSampleExpression(lat, lng, year)) };
+  const body = { expression: asExpression(buildPointSampleExpression(lat, lng, year, opts)) };
   const res = await fetch(`https://earthengine.googleapis.com/v1/projects/${project}/value:compute`, {
     method: "POST",
     headers: {
@@ -130,6 +159,54 @@ export async function fetchEmbeddingVector(
   });
 
   return { vector, source: "earth_engine" };
+}
+
+export interface AlgorithmInfo {
+  name: string;
+  arguments: string[];
+  returnType?: string;
+}
+
+/**
+ * Lists the server-side algorithms Earth Engine actually exposes, filtered by
+ * a substring of the name. The expression graph has to name these exactly, and
+ * the names differ from the client libraries' method names, so this turns a
+ * guess-and-redeploy loop into a single authoritative lookup.
+ */
+export async function listAlgorithms(
+  serviceAccountJson: string,
+  projectId: string | undefined,
+  query: string,
+  limit = 40,
+): Promise<{ total: number; matches: AlgorithmInfo[] }> {
+  const key: ServiceAccountKey = parseServiceAccountKey(serviceAccountJson);
+  const project = projectId || key.project_id;
+  const accessToken = await getGoogleAccessToken(key, EE_SCOPES);
+
+  const res = await fetch(`https://earthengine.googleapis.com/v1/projects/${project}/algorithms`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Earth Engine algorithms list failed (${res.status}): ${await res.text()}`);
+  }
+
+  const data = (await res.json()) as {
+    algorithms?: { name?: string; arguments?: { argumentName?: string }[]; returnType?: string }[];
+  };
+  const all = data.algorithms ?? [];
+  const needle = query.toLowerCase();
+  const matches = all
+    // Names come back as "algorithms/Image.reduceRegion"; the expression graph
+    // uses the part after the prefix.
+    .map((a) => ({
+      name: (a.name ?? "").replace(/^algorithms\//, ""),
+      arguments: (a.arguments ?? []).map((arg) => arg.argumentName ?? "?"),
+      returnType: a.returnType,
+    }))
+    .filter((a) => a.name.toLowerCase().includes(needle))
+    .slice(0, limit);
+
+  return { total: all.length, matches };
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
