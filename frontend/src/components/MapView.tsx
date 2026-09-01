@@ -237,11 +237,24 @@ export default function MapView({
         },
       });
       map.addSource(DEM_SOURCE_ID, DEM_SOURCE);
-      map.addLayer({
-        id: "sky",
-        type: "sky",
-        paint: { "sky-color": "#8fb8de", "sky-horizon-blend": 0.5, "horizon-color": "#dfeaf5", "horizon-fog-blend": 0.6 },
-      } as unknown as maplibregl.LayerSpecification);
+      // The sky only shows once the camera is pitched, so it is added once and
+      // left alone. It is deliberately NOT toggled: a sky layer has no layout
+      // properties, and calling setLayoutProperty on one throws, which would
+      // take the 3D switch down with it.
+      try {
+        map.addLayer({
+          id: "sky",
+          type: "sky",
+          paint: {
+            "sky-color": "#8fb8de",
+            "sky-horizon-blend": 0.5,
+            "horizon-color": "#dfeaf5",
+            "horizon-fog-blend": 0.6,
+          },
+        } as unknown as maplibregl.LayerSpecification);
+      } catch {
+        // An older renderer without sky support still gets terrain relief.
+      }
       readyRef.current = true;
       map.resize();
 
@@ -322,14 +335,18 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
-      if (terrain3d) {
-        map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
-        map.setLayoutProperty("sky", "visibility", "visible");
-        if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
-      } else {
-        map.setTerrain(null);
-        map.setLayoutProperty("sky", "visibility", "none");
-        if (map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+      try {
+        if (terrain3d) {
+          map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
+          if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
+        } else {
+          map.setTerrain(null);
+          if (map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+        }
+      } catch (err) {
+        // Elevation tiles are third-party and optional; the flat map must keep
+        // working if they cannot be applied.
+        console.error("terrain could not be applied", err);
       }
     };
     if (readyRef.current) apply();
