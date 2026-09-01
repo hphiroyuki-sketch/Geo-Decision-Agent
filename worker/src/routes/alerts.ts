@@ -34,24 +34,33 @@ alertRoutes.get("/unread-count", async (c) => {
 
   const last = await c.env.DB.prepare("SELECT MAX(checked_at) AS at FROM system_checks").first<{ at: string | null }>();
   const stale = !last?.at || Date.now() - Date.parse(last.at) > SELF_CHECK_INTERVAL_MS;
+  let queued = false;
   if (stale) {
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          await runSystemChecks(c.env);
-        } catch (err) {
-          console.error("self-check failed", err);
-        }
-        try {
-          await generateAlerts(c.env);
-        } catch (err) {
-          console.error("alert generation failed", err);
-        }
-      })(),
-    );
+    // Guarded: this endpoint drives the unread badge, and losing the badge to
+    // a diagnostic that could not be scheduled would be a worse failure than
+    // simply not running the diagnostic.
+    try {
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await runSystemChecks(c.env);
+          } catch (err) {
+            console.error("self-check failed", err);
+          }
+          try {
+            await generateAlerts(c.env);
+          } catch (err) {
+            console.error("alert generation failed", err);
+          }
+        })(),
+      );
+      queued = true;
+    } catch (err) {
+      console.error("could not schedule self-check", err);
+    }
   }
 
-  return c.json({ unread: row?.n ?? 0, selfCheckQueued: stale });
+  return c.json({ unread: row?.n ?? 0, selfCheckQueued: queued });
 });
 
 alertRoutes.post("/:id/read", async (c) => {
