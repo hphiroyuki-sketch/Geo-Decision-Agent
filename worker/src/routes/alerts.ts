@@ -20,9 +20,38 @@ alertRoutes.get("/", async (c) => {
   return c.json({ alerts: results, unread: unread?.n ?? 0 });
 });
 
+/**
+ * The badge poll, which the app makes about once a minute while anyone has it
+ * open. It doubles as the fallback driver for the self-checks and alert rules:
+ * cron is the primary schedule, but this path keeps diagnostics current even
+ * if the trigger is unavailable, and costs nothing when the last run is
+ * recent. The work runs after the response, so the badge never waits on it.
+ */
+const SELF_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+
 alertRoutes.get("/unread-count", async (c) => {
   const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM alerts WHERE read_at IS NULL").first<{ n: number }>();
-  return c.json({ unread: row?.n ?? 0 });
+
+  const last = await c.env.DB.prepare("SELECT MAX(checked_at) AS at FROM system_checks").first<{ at: string | null }>();
+  const stale = !last?.at || Date.now() - Date.parse(last.at) > SELF_CHECK_INTERVAL_MS;
+  if (stale) {
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          await runSystemChecks(c.env);
+        } catch (err) {
+          console.error("self-check failed", err);
+        }
+        try {
+          await generateAlerts(c.env);
+        } catch (err) {
+          console.error("alert generation failed", err);
+        }
+      })(),
+    );
+  }
+
+  return c.json({ unread: row?.n ?? 0, selfCheckQueued: stale });
 });
 
 alertRoutes.post("/:id/read", async (c) => {
