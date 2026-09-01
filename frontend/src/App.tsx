@@ -16,6 +16,7 @@ import MapExplorer from "./pages/MapExplorer";
 import DataCatalog from "./pages/DataCatalog";
 import ReportsIndex from "./pages/ReportsIndex";
 import Alerts from "./pages/Alerts";
+import LeapReport from "./pages/LeapReport";
 
 function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/projects/:id/report" element={<DecisionReport />} />
         <Route path="/projects/:id/field" element={<FieldSurvey />} />
         <Route path="/projects/:id/mesh" element={<MeshView />} />
+        <Route path="/projects/:id/leap" element={<LeapReport />} />
         <Route path="/projects/:id/recovery" element={<RecoveryPlan />} />
         <Route path="/admin" element={<Admin />} />
       </Route>

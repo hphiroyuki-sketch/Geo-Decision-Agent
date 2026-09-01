@@ -17,6 +17,7 @@ import {
   type CellClass,
 } from "../lib/mesh";
 import { buildRecoveryPlan } from "../lib/recoveryPlan";
+import { buildLeapReport } from "../lib/leap";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -512,4 +513,14 @@ meshRoutes.get("/meshes/:meshId/stats", async (c) => {
       changed: CHANGED_THRESHOLD,
     },
   });
+});
+
+/** FR-053 / FR-034: the LEAP-aligned report for a project. */
+meshRoutes.get("/projects/:id/leap", async (c) => {
+  try {
+    const report = await buildLeapReport(c.env, c.req.param("id"));
+    return c.json(report);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+  }
 });
