@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Sprout,
@@ -15,18 +15,21 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { api } from "../lib/api";
 
 function NavItem({
   to,
   icon: Icon,
   label,
   disabled,
+  badge,
   onClick,
 }: {
   to: string;
   icon: typeof Home;
   label: string;
   disabled?: boolean;
+  badge?: number;
   onClick?: () => void;
 }) {
   if (disabled) {
@@ -51,12 +54,17 @@ function NavItem({
       }
     >
       <Icon size={18} />
-      <span>{label}</span>
+      <span className="flex-1">{label}</span>
+      {badge ? (
+        <span className="bg-rose-500 text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </NavLink>
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({ onNavigate, unread }: { onNavigate?: () => void; unread: number }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -69,7 +77,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <NavItem to="/recovery" icon={Sprout} label="回復計画" onClick={onNavigate} />
         <NavItem to="/data" icon={Database} label="データ" onClick={onNavigate} />
         <NavItem to="/reports" icon={FileText} label="レポート" onClick={onNavigate} />
-        <NavItem to="/alerts" icon={Bell} label="アラート" onClick={onNavigate} />
+        <NavItem to="/alerts" icon={Bell} label="アラート" onClick={onNavigate} badge={unread} />
         {user?.role === "admin" && <NavItem to="/admin" icon={Settings} label="管理設定" onClick={onNavigate} />}
       </nav>
       <div className="px-2 pt-2 border-t border-white/10 mt-2">
@@ -102,6 +110,20 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export default function Layout() {
   const { user } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+
+  // Alerts are produced by a scheduled job, so the badge polls rather than
+  // waiting for a navigation to notice them.
+  useEffect(() => {
+    const poll = () =>
+      api
+        .get<{ unread: number }>("/alerts/unread-count")
+        .then((r) => setUnread(r.unread))
+        .catch(() => undefined);
+    poll();
+    const timer = setInterval(poll, 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden flex-col md:flex-row">
@@ -116,7 +138,7 @@ export default function Layout() {
             <div className="text-slate-400 text-[11px] leading-tight">限定公開 / MVP</div>
           </div>
         </div>
-        <SidebarContent />
+        <SidebarContent unread={unread} />
       </aside>
 
       {/* Mobile top bar */}
@@ -140,7 +162,7 @@ export default function Layout() {
                 <X size={20} />
               </button>
             </div>
-            <SidebarContent onNavigate={() => setDrawerOpen(false)} />
+            <SidebarContent onNavigate={() => setDrawerOpen(false)} unread={unread} />
           </div>
         </div>
       )}
@@ -181,7 +203,14 @@ export default function Layout() {
             }`
           }
         >
-          <Bell size={20} />
+          <span className="relative">
+            <Bell size={20} />
+            {unread > 0 && (
+              <span className="absolute -top-1 -right-1.5 bg-rose-500 text-white text-[9px] font-semibold rounded-full min-w-[15px] h-[15px] px-1 flex items-center justify-center">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </span>
           アラート
         </NavLink>
         {user?.role === "admin" && (

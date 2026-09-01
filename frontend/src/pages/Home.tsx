@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Compass, Camera, Grid3x3, Sprout, ChevronRight } from "lucide-react";
 import { api } from "../lib/api";
 import MapView from "../components/MapView";
+import { EmptyState } from "../components/Explain";
 
 interface ProjectRow {
   id: string;
@@ -78,6 +79,55 @@ export default function Home() {
         </button>
       </div>
 
+      {projects.length === 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+          <div className="text-sm font-semibold text-slate-800 mb-1">はじめての方へ — 結果が出るまでの4ステップ</div>
+          <p className="text-xs text-slate-500 mb-4">
+            このシステムは「衛星から見た土地の特徴」と「現場で確認した生きもの」を重ね合わせて、
+            保全すべき場所と回復すべき場所を示します。順番に進めてください。
+          </p>
+          <ol className="space-y-3">
+            {[
+              { icon: Plus, title: "調査を作成する", body: "案件名と対象地を登録します。" },
+              {
+                icon: Camera,
+                title: "現地記録を登録し、査読する",
+                body: "現場で撮った写真とGPSを登録し、「確認済み」にします。ここが後の判定の基準になるため、離れた複数地点で登録すると精度が上がります。",
+              },
+              {
+                icon: Grid3x3,
+                title: "10mメッシュ解析を実行する",
+                body: "対象地を10m四方に区切り、1マスずつ衛星データを取得して、保全優先・回復候補・要確認に色分けします。",
+              },
+              {
+                icon: Sprout,
+                title: "回復計画とレポートを確認する",
+                body: "どの区域に何をすべきかが自動で整理され、TNFD開示の形式でも出力できます。",
+              },
+            ].map((step, i) => (
+              <li key={step.title} className="flex gap-3">
+                <span className="w-6 h-6 rounded-full bg-[var(--gda-green)] text-white text-xs font-semibold flex items-center justify-center shrink-0">
+                  {i + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-slate-800 flex items-center gap-1.5">
+                    <step.icon size={13} className="text-slate-400" />
+                    {step.title}
+                  </div>
+                  <div className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{step.body}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <button
+            onClick={() => setShowNew(true)}
+            className="mt-4 w-full sm:w-auto flex items-center justify-center gap-2 bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] text-white text-sm font-medium px-4 py-2.5 rounded-xl"
+          >
+            <Plus size={15} /> 最初の調査を作成する
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
         {[
           { key: "in_progress", label: "進行中" },
@@ -129,13 +179,34 @@ export default function Home() {
                   最終更新日: {new Date(p.updated_at).toLocaleDateString("ja-JP")}
                 </div>
                 <div className="text-xs text-slate-400">候補地: {p.candidate_count}件</div>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center text-[11px] text-[var(--gda-green)] font-medium">
+                  AI調査を開く <ChevronRight size={12} />
+                </div>
               </div>
             </button>
           );
         })}
         {filtered.length === 0 && (
-          <div className="col-span-full text-center text-slate-400 text-sm py-12">
-            プロジェクトがありません。「新しい調査を開始」から作成してください。
+          <div className="col-span-full">
+            <EmptyState
+              icon={Compass}
+              title={query ? "該当するプロジェクトがありません" : "プロジェクトがまだありません"}
+              body={
+                query
+                  ? "検索条件を変えてお試しください。"
+                  : "「新しい調査を開始」から案件を作成すると、AIとの対話・10mメッシュ解析・回復計画が使えるようになります。"
+              }
+              action={
+                !query && (
+                  <button
+                    onClick={() => setShowNew(true)}
+                    className="inline-flex items-center gap-2 bg-[var(--gda-green)] text-white text-sm font-medium px-4 py-2 rounded-lg"
+                  >
+                    <Plus size={15} /> 新しい調査を開始
+                  </button>
+                )
+              }
+            />
           </div>
         )}
       </div>
