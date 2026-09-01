@@ -271,6 +271,24 @@ export default function MeshView() {
   const noHotspots = detail && detail.hotspots.length === 0 && detail.geojson.features.length > 0;
   const simMax = stats?.stats?.sim_max ?? null;
 
+  // A mesh where nearly every cell lands in one class cannot rank anything.
+  // It is arithmetically correct and practically useless, so it gets said
+  // plainly rather than shown as a uniformly coloured square.
+  const dominant = useMemo(() => {
+    if (!stats?.byClass?.length || !stats.stats?.sampled) return null;
+    const top = [...stats.byClass].sort((a, b) => b.n - a.n)[0];
+    const share = top.n / stats.stats.sampled;
+    return share >= 0.9 ? { cellClass: top.cell_class, share } : null;
+  }, [stats]);
+
+  const CLASS_TEXT: Record<string, string> = {
+    priority_a: "優先度A（保全優先）",
+    similar: "類似環境（回復候補）",
+    changed: "大きな変化（要現地確認）",
+    baseline: "一般区域",
+    unscored: "未評価",
+  };
+
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem-4rem)] md:h-screen">
       <div className="lg:w-[400px] lg:shrink-0 border-r border-slate-200 bg-white overflow-y-auto">
@@ -510,6 +528,28 @@ export default function MeshView() {
                   </div>
                 )}
               </div>
+            )}
+
+            {dominant && (
+              <Hint tone="warn">
+                <strong>
+                  取得したマスの {Math.round(dominant.share * 100)}% が「{CLASS_TEXT[dominant.cellClass] ?? dominant.cellClass}」に偏っています。
+                </strong>
+                この状態では区域どうしの優劣がつかず、「どこを優先すべきか」を示せません。
+                {referenceDistanceKm !== null && referenceDistanceKm < 0.2 ? (
+                  <>
+                    {" "}
+                    基準地点が解析範囲の内側（約{(referenceDistanceKm * 1000).toFixed(0)}m）にあるためです。
+                    <strong>解析する範囲を 1km 以上に広げる</strong>か、
+                    <strong>基準地点から離れた場所を中心に指定</strong>すると、差が出て順位づけができるようになります。
+                  </>
+                ) : (
+                  <>
+                    {" "}
+                    解析範囲を広げて環境の異なる場所を含めるか、性質の違う複数地点で現地記録を登録してください。
+                  </>
+                )}
+              </Hint>
             )}
 
             {/* When nothing crossed a threshold, say so in plain terms and say why */}
