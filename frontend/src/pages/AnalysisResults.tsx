@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { BarChart3, ThumbsUp, TriangleAlert, HelpCircle } from "lucide-react";
 import { api } from "../lib/api";
 import MapView from "../components/MapView";
+import { Term, Hint, EmptyState, Verdict } from "../components/Explain";
 
 interface Candidate {
   id: string;
@@ -46,6 +49,46 @@ function scoreDot(score: number): string {
   return "#b3432b";
 }
 
+/**
+ * V-04 asks for good points, concerns and uncertainty side by side. These are
+ * derived from the candidate's own numbers against stated cut-offs rather than
+ * written prose, so two candidates are always judged the same way and a
+ * reviewer can check any line against the table below.
+ */
+function readCandidate(c: Candidate) {
+  const pros: string[] = [];
+  const cons: string[] = [];
+  const unknowns: string[] = [];
+
+  if (c.habitat_overlap != null && c.habitat_overlap < 0.2) pros.push(`生息地との重複が ${(c.habitat_overlap * 100).toFixed(0)}% と低い`);
+  if (c.habitat_overlap != null && c.habitat_overlap >= 0.4) cons.push(`生息地との重複が ${(c.habitat_overlap * 100).toFixed(0)}% と高い`);
+
+  if (c.protected_area_distance_km != null && c.protected_area_distance_km >= 3)
+    pros.push(`最近接の保護区域まで ${c.protected_area_distance_km.toFixed(1)}km と余裕がある`);
+  if (c.protected_area_distance_km != null && c.protected_area_distance_km < 1.5)
+    cons.push(`保護区域まで ${c.protected_area_distance_km.toFixed(1)}km と近接している`);
+
+  if (c.connectivity_impact === "低") pros.push("生態系ネットワークの分断リスクが低い");
+  if (c.connectivity_impact === "高") cons.push("生態系ネットワークの通り道を分断する可能性がある");
+
+  if (c.access_rating === "良い") pros.push(`搬入路まで ${c.access_distance_km?.toFixed(1)}km でアクセスが良い`);
+  if (c.access_rating === "悪い") cons.push(`アクセスが悪く（${c.access_distance_km?.toFixed(1)}km）工事コストが増える可能性`);
+
+  if (c.field_records_count > 0) pros.push(`周辺に現地記録が ${c.field_records_count} 件あり、判断の裏付けがある`);
+  else unknowns.push("周辺に現地記録がなく、実際の生息状況は未確認");
+
+  const basis = (c.evidence_basis ?? "").split(",");
+  if (!basis.some((b) => b.includes("Earth Engine実データ")))
+    unknowns.push("衛星の実測値が使われておらず、類似度は推定値");
+  if (basis.some((b) => b.includes("未確認")))
+    unknowns.push("未査読の現地記録が含まれており、確定した根拠ではない");
+  if (c.confidence === "低") unknowns.push("データが乏しく、信頼度は「低」");
+
+  unknowns.push("生息地重複度・保護区域距離・アクセスは本MVPではシミュレーション値");
+
+  return { pros, cons, unknowns };
+}
+
 export default function AnalysisResults() {
   const { id } = useParams<{ id: string }>();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -74,11 +117,48 @@ export default function AnalysisResults() {
       </div>
 
       {candidates.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400 text-sm">
-          まだ分析結果がありません。AI調査チャットで候補地の比較を依頼してください。
+        <div className="bg-white rounded-xl border border-slate-200">
+          <EmptyState
+            icon={BarChart3}
+            title="まだ比較結果がありません"
+            body="AI調査チャットで「この2地点を比較して」のように依頼すると、同じ評価軸で候補地をランキングし、回避・低減策まで提示します。"
+            action={
+              <Link
+                to={`/projects/${id}`}
+                className="inline-block bg-[var(--gda-green)] text-white text-sm font-medium px-4 py-2 rounded-lg"
+              >
+                AI調査を開く
+              </Link>
+            }
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {candidates[0] && (
+            <div className="col-span-full bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div className="text-[11px] text-slate-400 mb-1">結論</div>
+              <p className="text-sm text-slate-800 leading-relaxed">
+                比較した {candidates.length} 地点のうち、生物多様性への影響が最も小さいのは
+                <strong className="mx-1">{candidates[0].label}</strong>
+                （総合スコア {candidates[0].score}）です。
+                {candidates[1] && (
+                  <>
+                    次点は {candidates[1].label}（{candidates[1].score}）で、差は{" "}
+                    {candidates[0].score - candidates[1].score} 点です。
+                    {candidates[0].score - candidates[1].score < 8 &&
+                      "差が小さいため、スコアだけで決めず、下の懸念点の内容を見て判断してください。"}
+                  </>
+                )}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Verdict level={candidates[0].confidence === "高" ? "good" : candidates[0].confidence === "中" ? "watch" : "act"}>
+                  信頼度 {candidates[0].confidence}
+                </Verdict>
+                <Verdict level="watch">最終判断には現地確認が必要</Verdict>
+              </div>
+            </div>
+          )}
+
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-64 sm:h-[420px]">
             <MapView
               center={projectCenter}
@@ -107,6 +187,29 @@ export default function AnalysisResults() {
                     </span>
                   ))}
                 </div>
+                {(() => {
+                  const reading = readCandidate(c);
+                  return (
+                    <div className="space-y-1.5 mb-2 text-[11px] leading-relaxed">
+                      {reading.pros.length > 0 && (
+                        <div className="flex gap-1.5">
+                          <ThumbsUp size={12} className="shrink-0 mt-0.5" />
+                          <div>{reading.pros.join("／")}</div>
+                        </div>
+                      )}
+                      {reading.cons.length > 0 && (
+                        <div className="flex gap-1.5">
+                          <TriangleAlert size={12} className="shrink-0 mt-0.5" />
+                          <div>{reading.cons.join("／")}</div>
+                        </div>
+                      )}
+                      <div className="flex gap-1.5 opacity-80">
+                        <HelpCircle size={12} className="shrink-0 mt-0.5" />
+                        <div>{reading.unknowns.join("／")}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <button
                   onClick={() => setExpanded(expanded === c.id ? null : c.id)}
                   className="text-[11px] underline underline-offset-2"
@@ -138,8 +241,12 @@ export default function AnalysisResults() {
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500">
                   <th className="text-left px-4 py-3 font-medium">候補</th>
-                  <th className="text-left px-4 py-3 font-medium">環境変化 (NDRE)</th>
-                  <th className="text-left px-4 py-3 font-medium">類似度 (AlphaEarth)</th>
+                  <th className="text-left px-4 py-3 font-medium">
+                    <Term id="ndre">環境変化 (NDRE)</Term>
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium">
+                    <Term id="similarity">類似度</Term>
+                  </th>
                   <th className="text-left px-4 py-3 font-medium">アクセス</th>
                   <th className="text-left px-4 py-3 font-medium">信頼度</th>
                   <th className="text-left px-4 py-3 font-medium">推奨アクション</th>
@@ -162,8 +269,14 @@ export default function AnalysisResults() {
                 ))}
               </tbody>
             </table>
-            <div className="px-4 py-2 text-[11px] text-slate-400 border-t border-slate-50">
-              結果はAIによる推定です（シミュレーションデータ）。最終判断には現地確認・専門家レビューが必要です。
+            <div className="px-4 py-3 border-t border-slate-50">
+              <Hint tone="warn">
+                <strong>この表の読み方。</strong>
+                「類似度」だけは条件が揃えば衛星の実測値ですが、生息地重複度・保護区域距離・アクセスは本MVPでは
+                シミュレーション値です。各候補の
+                <Term id="evidence">根拠ステータス</Term>
+                を必ず確認し、法令適合性・アセスメントの要否は所管行政庁と専門家に確認してください。
+              </Hint>
             </div>
           </div>
         </div>
