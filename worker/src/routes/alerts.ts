@@ -97,6 +97,8 @@ alertRoutes.get("/system-checks", async (c) => {
 
 /** Runs the checks immediately (admin action, mirrors the cron). */
 alertRoutes.post("/system-checks/run", async (c) => {
-  const results = await runSystemChecks(c.env);
+  // A person is waiting on this one, so it also fetches the algorithm
+  // catalogue that the scheduled run skips for CPU budget reasons.
+  const results = await runSystemChecks(c.env, { includeAlgorithms: true });
   return c.json({ checks: results });
 });

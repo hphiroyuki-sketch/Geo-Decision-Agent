@@ -40,17 +40,49 @@ async function timed(name: string, fn: () => Promise<{ message: string; detail?:
  *  query's fault rather than a gap in coverage. */
 const PROBE = { lat: 35.6812, lng: 139.7671 };
 
-export async function runSystemChecks(env: Env): Promise<CheckResult[]> {
+/**
+ * Writes one result immediately. The Free plan's 10ms CPU ceiling applies to
+ * scheduled invocations too, so a batch written at the end is lost whole if
+ * any earlier step overruns - recording as we go means a partial run still
+ * leaves evidence of how far it got.
+ */
+async function record(env: Env, r: CheckResult): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO system_checks (id, check_name, ok, message, detail, duration_ms, checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      newId("chk"),
+      r.name,
+      r.ok ? 1 : 0,
+      r.message.slice(0, 900),
+      r.detail?.slice(0, 900) ?? null,
+      r.durationMs,
+      new Date().toISOString(),
+    )
+    .run();
+}
+
+export interface SystemCheckOptions {
+  /** Listing Earth Engine's ~1000 algorithms means parsing a megabyte of JSON,
+   *  which alone can exceed the scheduled CPU budget - so it runs only when a
+   *  person asks for it from the admin screen. */
+  includeAlgorithms?: boolean;
+}
+
+export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const year = Number(await getSetting(env.DB, "earth_engine_year", "2024"));
 
   if (!env.EE_SERVICE_ACCOUNT_JSON) {
-    results.push({
+    const missing: CheckResult = {
       name: "ee_secret",
       ok: false,
       message: "EE_SERVICE_ACCOUNT_JSON が未設定です。",
       durationMs: 0,
-    });
+    };
+    results.push(missing);
+    await record(env, missing);
   } else {
     results.push(
       await timed("ee_embedding", async () => {
@@ -64,6 +96,7 @@ export async function runSystemChecks(env: Env): Promise<CheckResult[]> {
         return { message: `ok (${vector.length}次元)`, detail: JSON.stringify(vector.slice(0, 3)) };
       }),
     );
+    await record(env, results[results.length - 1]);
 
     results.push(
       await timed("ee_indices", async () => {
@@ -82,36 +115,30 @@ export async function runSystemChecks(env: Env): Promise<CheckResult[]> {
         };
       }),
     );
+    await record(env, results[results.length - 1]);
 
-    // Records the real algorithm names for the operations the indices graph
-    // depends on, so a name mismatch can be corrected from the recorded list
-    // rather than by guessing again.
-    for (const query of ["normalizedDifference", "addBands", "filterBounds", "median", "rename"]) {
-      results.push(
-        await timed(`ee_algorithms:${query}`, async () => {
+    // Records the real algorithm names behind the indices graph, so a name
+    // mismatch is corrected from the returned list rather than guessed at
+    // again. One listing covers every query, because fetching the catalogue
+    // repeatedly is what makes this expensive.
+    if (opts.includeAlgorithms) {
+      const check = await timed("ee_algorithms", async () => {
+        const found: string[] = [];
+        for (const query of ["normalizedDifference", "addBands", "filterBounds", "median"]) {
           const { matches } = await listAlgorithms(
             env.EE_SERVICE_ACCOUNT_JSON as string,
             env.EE_PROJECT_ID,
             query,
-            12,
+            6,
           );
-          return {
-            message: `${matches.length} 件`,
-            detail: JSON.stringify(matches.map((m) => `${m.name}(${m.arguments.join(",")})`)),
-          };
-        }),
-      );
+          found.push(...matches.map((m) => `${m.name}(${m.arguments.join(",")})`));
+        }
+        return { message: `${found.length} 件`, detail: JSON.stringify(found) };
+      });
+      results.push(check);
+      await record(env, check);
     }
   }
-
-  const now = new Date().toISOString();
-  const statements = results.map((r) =>
-    env.DB.prepare(
-      `INSERT INTO system_checks (id, check_name, ok, message, detail, duration_ms, checked_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(newId("chk"), r.name, r.ok ? 1 : 0, r.message, r.detail ?? null, r.durationMs, now),
-  );
-  if (statements.length) await env.DB.batch(statements);
 
   // Keep only recent history; this table is a diagnostic, not an archive.
   await env.DB.prepare(
