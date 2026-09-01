@@ -135,6 +135,9 @@ export default function MeshView() {
   const [exaggeration, setExaggeration] = useState(1.5);
   const [selected, setSelected] = useState<CellProperties | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Distinguishes "no analysis" from "analysis exists but the map could not
+  // draw it" - the two look identical on screen and need different fixes.
+  const [overlayOk, setOverlayOk] = useState<boolean | null>(null);
 
   const [cellSizeM, setCellSizeM] = useState(10);
   const [extentM, setExtentM] = useState(200);
@@ -530,6 +533,14 @@ export default function MeshView() {
               </div>
             )}
 
+            {overlayOk === false && detail.geojson.features.length > 0 && (
+              <Hint tone="warn">
+                <strong>解析結果はありますが、地図に描画できませんでした。</strong>
+                データの問題ではなく表示側の問題です。ページを再読み込みしても直らない場合はお知らせください
+                （ブラウザのコンソールに原因が出力されています）。
+              </Hint>
+            )}
+
             {dominant && (
               <Hint tone="warn">
                 <strong>
@@ -674,6 +685,7 @@ export default function MeshView() {
           terrainExaggeration={exaggeration}
           meshHeightMode={heightMode}
           onCellClick={setSelected}
+          onOverlayStatus={setOverlayOk}
           onMapClick={
             pickOnMap
               ? (lat, lng) => {
