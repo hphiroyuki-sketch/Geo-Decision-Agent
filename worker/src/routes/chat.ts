@@ -6,6 +6,7 @@ import { getSetting, currentMonthKey } from "../lib/db";
 import { estimateCostUsd, getBudgetStatus } from "../lib/pricing";
 import { makeClient, buildSystemPrompt, ANALYZE_TOOL } from "../lib/anthropicClient";
 import { analyzeCandidates, type CandidateInput, type RealDataOverride } from "../lib/geoEngine";
+import { buildMeshContext } from "../lib/mesh";
 import {
   getEmbeddingVector,
   getReferenceEmbedding,
@@ -99,6 +100,12 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
       const enc = new TextEncoder();
       const send = (type: string, data: unknown) => controller.enqueue(enc.encode(sseEvent(type, data)));
 
+      // The mesh findings ride along as context so the assistant reasons from
+      // what the grid measured rather than restating the conversation.
+      const meshContext = conversation.project_id
+        ? await buildMeshContext(c.env.DB, conversation.project_id)
+        : null;
+
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
       let fullText = "";
@@ -112,6 +119,7 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
             thinking: { type: "disabled" },
             system: [
               { type: "text", text: buildSystemPrompt(appName), cache_control: { type: "ephemeral" } },
+              ...(meshContext ? [{ type: "text" as const, text: meshContext }] : []),
             ],
             tools: [ANALYZE_TOOL],
             messages,

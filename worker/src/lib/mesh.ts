@@ -297,3 +297,82 @@ export function findHotspots(cells: HotspotCell[], cellSizeM: number, minCells =
 }
 
 export { newId };
+
+interface MeshContextRow {
+  mesh_id: string;
+  cell_size_m: number;
+  extent_m: number;
+  year: number;
+  reference_points: number;
+  center_lat: number;
+  center_lng: number;
+}
+
+/**
+ * A compact briefing on the project's latest mesh, injected into the chat's
+ * system context so the assistant can reason about what the grid actually
+ * found instead of re-deriving it in prose. Returns null when no mesh exists.
+ *
+ * Deliberately short: it rides along on every turn, so it carries the ranked
+ * findings and their numbers, not the whole cell table.
+ */
+export async function buildMeshContext(db: D1Database, projectId: string): Promise<string | null> {
+  const mesh = await db
+    .prepare(
+      `SELECT id AS mesh_id, cell_size_m, extent_m, year, reference_points, center_lat, center_lng
+       FROM meshes WHERE project_id = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(projectId)
+    .first<MeshContextRow>();
+  if (!mesh) return null;
+
+  const { results: byClass } = await db
+    .prepare(
+      `SELECT cell_class, COUNT(*) AS n FROM mesh_cells WHERE mesh_id = ? AND status = 'sampled' GROUP BY cell_class`,
+    )
+    .bind(mesh.mesh_id)
+    .all<{ cell_class: string; n: number }>();
+
+  const { results: hotspots } = await db
+    .prepare(
+      `SELECT rank, cell_class, area_ha, center_lat, center_lng, mean_similarity, mean_change, compactness, field_records
+       FROM mesh_hotspots WHERE mesh_id = ? ORDER BY rank LIMIT 8`,
+    )
+    .bind(mesh.mesh_id)
+    .all<{
+      rank: number;
+      cell_class: string;
+      area_ha: number;
+      center_lat: number;
+      center_lng: number;
+      mean_similarity: number | null;
+      mean_change: number | null;
+      compactness: number;
+      field_records: number;
+    }>();
+
+  if (hotspots.length === 0) return null;
+
+  const lines = hotspots.map(
+    (h) =>
+      `  #${h.rank} ${CELL_CLASS_LABEL[h.cell_class as CellClass]} / ${h.area_ha.toFixed(2)}ha / 中心 ${h.center_lat.toFixed(5)},${h.center_lng.toFixed(5)}` +
+      ` / 類似度 ${h.mean_similarity?.toFixed(3) ?? "—"} / 変化 ${h.mean_change?.toFixed(3) ?? "—"}` +
+      ` / 連結度 ${h.compactness.toFixed(2)} / 現地記録 ${h.field_records}件`,
+  );
+
+  const counts = byClass.map((b) => `${CELL_CLASS_LABEL[b.cell_class as CellClass]} ${b.n}`).join("、");
+
+  return [
+    `# このプロジェクトの10mメッシュ解析結果（実データ）`,
+    `対象年 ${mesh.year} / セル ${mesh.cell_size_m}m / 範囲 ${mesh.extent_m}m四方 / 中心 ${mesh.center_lat.toFixed(5)},${mesh.center_lng.toFixed(5)}`,
+    `基準地点（確認済み現地記録）: ${mesh.reference_points} 地点`,
+    `セル分類: ${counts}`,
+    `重要区域（重要度順）:`,
+    ...lines,
+    ``,
+    `これらは Google Satellite Embedding の実測ベクトルから算出した値です。`,
+    `ユーザーが対象地の状況・保全優先度・回復候補を尋ねた場合は、この結果を根拠として区域を名指しで示してください。`,
+    `ただし「大きな変化」の原因は衛星では判定できないため、原因を断定せず現地確認を必須として述べてください。`,
+    `基準地点が0の場合、類似度は算出されておらず保全優先・回復候補の判定は成立しません。その旨を明示してください。`,
+  ].join("\n");
+}
