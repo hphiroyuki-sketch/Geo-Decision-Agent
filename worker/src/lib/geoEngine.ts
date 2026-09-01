@@ -17,6 +17,15 @@ export interface CandidateInput {
   notes?: string;
 }
 
+// Real data swapped in per candidate when available (Earth Engine embedding
+// fetch succeeded, and/or the project has nearby field_records). Any field
+// left undefined falls back to the simulated value for that axis.
+export interface RealDataOverride {
+  alphaEarthSimilarity?: number;
+  fieldRecordsCount?: number;
+  fieldSpeciesNames?: string[];
+}
+
 export interface MitigationMeasure {
   stage: "avoid" | "reduce" | "restore" | "offset";
   description: string;
@@ -84,17 +93,20 @@ function accessRating(km: number): string {
 export function analyzeCandidates(
   projectSeed: string,
   candidates: CandidateInput[],
+  overrides: Record<string, RealDataOverride> = {},
 ): CandidateResult[] {
   const results = candidates.map((c) => {
     const rng = mulberry32(seedFromString(`${projectSeed}::${c.name}`));
+    const override = overrides[c.name] ?? {};
 
     const habitatOverlap = clamp(rng() * 0.9 + rng() * 0.1, 0, 1);
     const protectedAreaDistanceKm = clamp(rng() * 6, 0.1, 6);
     const connectivityRaw = rng();
     const ndreChangePct = -1 * clamp(rng() * 18, 0, 18); // negative = vegetation stress
-    const alphaEarthSimilarity = clamp(0.5 + rng() * 0.5, 0, 1);
+    const simulatedAlphaEarthSimilarity = clamp(0.5 + rng() * 0.5, 0, 1);
+    const alphaEarthSimilarity = override.alphaEarthSimilarity ?? simulatedAlphaEarthSimilarity;
     const accessDistanceKm = clamp(rng() * 5, 0.2, 5);
-    const fieldRecordsCount = Math.floor(rng() * 5);
+    const fieldRecordsCount = override.fieldRecordsCount ?? Math.floor(rng() * 5);
 
     const connectivityPenalty = connectivityRaw * 20;
     const protectedProximityPenalty = Math.max(0, 2.5 - protectedAreaDistanceKm) * 8;
@@ -106,7 +118,7 @@ export function analyzeCandidates(
       alphaEarthSimilarity * 12;
     const score = Math.round(clamp(100 - riskScore, 5, 97));
 
-    const evidenceBasis = ["衛星推定"];
+    const evidenceBasis = [override.alphaEarthSimilarity !== undefined ? "Earth Engine実データ" : "衛星推定"];
     let confidence: "高" | "中" | "低" = "低";
     if (fieldRecordsCount >= 3) {
       evidenceBasis.push("現地確認済み");
@@ -114,6 +126,9 @@ export function analyzeCandidates(
     } else if (fieldRecordsCount >= 1) {
       evidenceBasis.push("現地確認済み");
       confidence = "中";
+    }
+    if (override.fieldSpeciesNames?.length) {
+      evidenceBasis.push(`現地記録種: ${override.fieldSpeciesNames.slice(0, 3).join("・")}`);
     }
 
     const mitigations: MitigationMeasure[] = [];

@@ -7,6 +7,7 @@ import Home from "./pages/Home";
 import ProjectChat from "./pages/ProjectChat";
 import AnalysisResults from "./pages/AnalysisResults";
 import DecisionReport from "./pages/DecisionReport";
+import FieldSurvey from "./pages/FieldSurvey";
 import Admin from "./pages/Admin";
 
 function ProtectedLayout() {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/projects/:id" element={<ProjectChat />} />
         <Route path="/projects/:id/analysis" element={<AnalysisResults />} />
         <Route path="/projects/:id/report" element={<DecisionReport />} />
+        <Route path="/projects/:id/field" element={<FieldSurvey />} />
         <Route path="/admin" element={<Admin />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

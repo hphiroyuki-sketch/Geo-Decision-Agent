@@ -15,6 +15,10 @@ database_name = "geo-decision-agent-db"
 database_id = "b66fbe2c-b2f0-411c-a38c-adcbaac3e003"
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "geo-decision-agent-photos"
+
 [vars]
 APP_NAME = "Geo Decision Agent"
 CLAUDE_MODEL = "claude-sonnet-5"
@@ -22,7 +26,7 @@ DEFAULT_MONTHLY_BUDGET_JPY = "5000"
 DEFAULT_USD_JPY_RATE = "155"
 
 # Secrets (set via `wrangler secret put`, NOT stored here):
-#   ANTHROPIC_API_KEY   - Claude API key
-#   SESSION_SECRET       - HMAC secret for signed session cookies
-#   ADMIN_EMAIL          - the first account auto-promoted to admin on signup
-#   ADMIN_INVITE_CODE    - one-time invite code to bootstrap the first admin account
+#   ANTHROPIC_API_KEY     - Claude API key
+#   SESSION_SECRET        - HMAC secret for signed session cookies
+#   EE_SERVICE_ACCOUNT_JSON - Google service account JSON key with Earth Engine access (optional; falls back to simulated data when unset)
+#   EE_PROJECT_ID           - GCP project registered for Earth Engine (optional; defaults to the service account's own project)

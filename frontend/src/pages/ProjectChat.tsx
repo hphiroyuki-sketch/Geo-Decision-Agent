@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon } from "lucide-react";
+import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera } from "lucide-react";
 import { api, streamChat } from "../lib/api";
 import MapView, { type MapMarker } from "../components/MapView";
 
@@ -43,6 +43,7 @@ export default function ProjectChat() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [fieldRecords, setFieldRecords] = useState<{ lat: number; lng: number; species_guess: string | null }[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [stepLabel, setStepLabel] = useState<string | null>(null);
@@ -65,6 +66,10 @@ export default function ProjectChat() {
       setMessages(msgs.messages);
       const cand = await api.get<{ candidates: Candidate[] }>(`/projects/${id}/candidates`);
       setCandidates(cand.candidates);
+      const field = await api.get<{ records: { lat: number; lng: number; species_guess: string | null }[] }>(
+        `/projects/${id}/field-records`,
+      );
+      setFieldRecords(field.records);
     })();
   }, [id]);
 
@@ -109,9 +114,17 @@ export default function ProjectChat() {
     }
   };
 
-  const markers: MapMarker[] = candidates
-    .filter((c) => c.lat != null && c.lng != null)
-    .map((c) => ({ lat: c.lat as number, lng: c.lng as number, label: `${c.label} (score ${c.score})`, color: scoreColor(c.score) }));
+  const markers: MapMarker[] = [
+    ...candidates
+      .filter((c) => c.lat != null && c.lng != null)
+      .map((c) => ({ lat: c.lat as number, lng: c.lng as number, label: `${c.label} (score ${c.score})`, color: scoreColor(c.score) })),
+    ...fieldRecords.map((f) => ({
+      lat: f.lat,
+      lng: f.lng,
+      label: `現地記録: ${f.species_guess ?? "種未記入"}`,
+      color: "#2563eb",
+    })),
+  ];
 
   return (
     <div className="flex flex-col md:flex-row h-full">
@@ -168,22 +181,30 @@ export default function ProjectChat() {
           )}
           <div ref={bottomRef} />
         </div>
-        {candidates.length > 0 && (
-          <div className="px-4 py-2 border-t border-slate-100 flex gap-2">
-            <Link
-              to={`/projects/${id}/analysis`}
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
-            >
-              <BarChart3 size={14} /> 分析結果
-            </Link>
-            <Link
-              to={`/projects/${id}/report`}
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
-            >
-              <FileText size={14} /> レポート
-            </Link>
-          </div>
-        )}
+        <div className="px-4 py-2 border-t border-slate-100 flex gap-2">
+          <Link
+            to={`/projects/${id}/field`}
+            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
+          >
+            <Camera size={14} /> 現地記録
+          </Link>
+          {candidates.length > 0 && (
+            <>
+              <Link
+                to={`/projects/${id}/analysis`}
+                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
+              >
+                <BarChart3 size={14} /> 分析結果
+              </Link>
+              <Link
+                to={`/projects/${id}/report`}
+                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
+              >
+                <FileText size={14} /> レポート
+              </Link>
+            </>
+          )}
+        </div>
         <div className="p-3 border-t border-slate-100 flex gap-2">
           <input
             value={input}

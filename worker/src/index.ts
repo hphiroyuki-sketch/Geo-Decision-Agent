@@ -6,6 +6,7 @@ import { authRoutes } from "./routes/auth";
 import { adminRoutes } from "./routes/admin";
 import { projectRoutes } from "./routes/projects";
 import { chatRoutes } from "./routes/chat";
+import { fieldRecordRoutes } from "./routes/fieldRecords";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -18,6 +19,9 @@ app.route("/api/auth", authRoutes);
 
 app.use("/api/projects/*", requireAuth);
 app.route("/api/projects", projectRoutes);
+
+app.use("/api/field-records/*", requireAuth);
+app.route("/api", fieldRecordRoutes);
 
 app.use("/api/conversations/*", requireAuth);
 app.route("/api/conversations", chatRoutes);
