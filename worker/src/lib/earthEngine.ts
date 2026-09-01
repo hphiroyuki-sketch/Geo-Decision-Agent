@@ -9,12 +9,9 @@
 // format, not a public high-level shortcut. It is built from documented
 // operation names (Image.reduceRegion, Reducer.first, Collection.filterDate,
 // ImageCollection.mosaic, GeometryConstructors.Point, ImageCollection.load)
-// but has not been exercised against a live Earth Engine project from this
-// environment - the build sandbox's network policy blocks
-// developers.google.com and earthengine.googleapis.com, so this has only
-// been reviewed, not run. The first real call after deploy is the actual
-// test; Earth Engine's error responses name the exact function/argument at
-// fault, so a mismatch here is a quick, visible fix rather than a silent one.
+// and refined against the live API's error responses (this sandbox cannot
+// reach earthengine.googleapis.com, so each round trip goes through a deploy
+// and the /api/admin/ee-test diagnostic endpoint).
 
 import { getGoogleAccessToken, parseServiceAccountKey, type ServiceAccountKey } from "./googleAuth";
 
@@ -26,6 +23,22 @@ type EeValue =
   | { constantValue: unknown }
   | { arrayValue: { values: EeValue[] } }
   | { functionInvocationValue: { functionName: string; arguments: Record<string, EeValue> } };
+
+// The API's Expression message is not a bare value node - it is a map of named
+// nodes plus the name of the one whose value to return. Nested arguments may
+// stay inline as value nodes, so a single entry pointing at the root of the
+// graph is enough. Posting the root node directly is what produced
+// `Unknown name "functionInvocationValue" at 'expression'`.
+interface EeExpression {
+  values: Record<string, EeValue>;
+  result: string;
+}
+
+const ROOT_NODE = "0";
+
+function asExpression(root: EeValue): EeExpression {
+  return { values: { [ROOT_NODE]: root }, result: ROOT_NODE };
+}
 
 function buildPointSampleExpression(lat: number, lng: number, year: number): EeValue {
   const collection: EeValue = {
@@ -85,7 +98,7 @@ export async function fetchEmbeddingVector(
   const project = projectId || key.project_id;
   const accessToken = await getGoogleAccessToken(key, EE_SCOPES);
 
-  const body = { expression: buildPointSampleExpression(lat, lng, year) };
+  const body = { expression: asExpression(buildPointSampleExpression(lat, lng, year)) };
   const res = await fetch(`https://earthengine.googleapis.com/v1/projects/${project}/value:compute`, {
     method: "POST",
     headers: {
@@ -100,11 +113,19 @@ export async function fetchEmbeddingVector(
     throw new Error(`Earth Engine value:compute failed (${res.status}): ${errText}`);
   }
 
-  const data = (await res.json()) as { result?: Record<string, number> };
+  const data = (await res.json()) as { result?: Record<string, unknown> };
   const dict = data.result ?? {};
   const vector = EMBEDDING_BANDS.map((band) => {
     const v = dict[band];
-    if (typeof v !== "number") throw new Error(`Earth Engine response missing band ${band}`);
+    if (typeof v !== "number") {
+      // A null band means the query succeeded but no imagery covers this
+      // point/year - a different failure from a malformed request, so say
+      // which it is rather than just naming the band.
+      throw new Error(
+        `Earth Engine returned no value for band ${band} at ${lat},${lng} (year ${year}). ` +
+          `Response keys: ${JSON.stringify(Object.keys(dict).slice(0, 8))}`,
+      );
+    }
     return v;
   });
 
