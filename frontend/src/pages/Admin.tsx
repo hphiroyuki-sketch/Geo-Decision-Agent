@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Copy, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
+import SystemHealth from "../components/SystemHealth";
 
 interface Invite {
   id: string;
@@ -73,6 +74,8 @@ export default function Admin() {
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-lg font-semibold text-slate-800">管理設定</h1>
+
+      <SystemHealth />
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
         <div className="flex items-center justify-between mb-3">
