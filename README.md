@@ -11,6 +11,8 @@
 - **月次予算の自動停止**: 月間のAI利用コストを円換算で集計し、管理画面で設定した上限（既定 ¥5,000）に達すると、当月はチャットが自動的に停止します。
 - **構造化ツール呼び出しによる分析**: LLM は生の数値を作文せず、`analyze_site_candidates` という構造化ツールを呼び出し、その結果だけを根拠に説明します（要件書 FR-004 に対応）。
 - **4つの主要画面**: ホーム（プロジェクトマップ・ステータス）／AI調査チャット＋地図／分析結果（候補地ランキング・ミティゲーション案）／意思決定レポート（監査証跡・レビュー・PDF書き出し）。
+- **現地記録（現地調査モバイル、V-05）**: スマホのカメラ・GPSで写真・位置・種候補を記録し、R2に保存。分析時に候補地から500m以内の現地記録を実データとして参照する。
+- **Google Earth Engine連携（任意）**: `EE_SERVICE_ACCOUNT_JSON` を設定すると、Satellite Embeddingの実データを取得し、現地記録で確認済みの地点の埋め込みベクトルを平均した「基準ベクトル」との類似度を候補地ごとに算出する。未設定の場合は自動的にシミュレーション値にフォールバックする。
 - **管理画面**: 招待コードの発行・失効、ユーザー管理、月次利用状況グラフ、予算上限の変更。
 
 ## 実装していないこと（本番販売前に必要な作業）
@@ -19,7 +21,7 @@
 
 | 項目 | 現状 | 本番化に必要なこと |
 |---|---|---|
-| 衛星データ（AlphaEarth/Sentinel-2） | `worker/src/lib/geoEngine.ts` の**シミュレーション値**（決定的な擬似乱数） | Google Earth Engine サービスアカウント・データライセンス契約・実バッチパイプライン |
+| Satellite Embedding以外の衛星指標（NDVI/NDRE/NBR、Sentinel-2、土地被覆） | `worker/src/lib/geoEngine.ts` の**シミュレーション値** | Sentinel-2等の追加データパイプライン |
 | マルチテナント/RBAC | 単一テナント、ロールは admin/member/viewer の3段階のみ | 11章のデータモデルに沿ったテナント分離、ABAC |
 | SSO/SAML/SCIM | メール＋パスワードのみ | OIDC/SAML連携 |
 | TNFD/SSBJ自動出力 | なし | LEAP整合の自動書式変換 |
@@ -83,6 +85,10 @@ npm run deploy
 | `CLOUDFLARE_ACCOUNT_ID` | CloudflareアカウントID |
 | `ANTHROPIC_API_KEY` | Claude APIキー |
 | `APP_SESSION_SECRET` | セッション署名用のランダムな文字列（`openssl rand -hex 32` 等で生成） |
+| `EE_SERVICE_ACCOUNT_JSON`（任意） | Earth Engine権限を持つGoogleサービスアカウントのJSON鍵の中身 |
+| `EE_PROJECT_ID`（任意） | Earth Engine登録済みのGCPプロジェクトID（サービスアカウント自身のプロジェクトと同じなら省略可） |
+
+R2バケット（現地記録の写真保存用）はCloudflareダッシュボードで一度R2を有効化した後、デプロイ時に自動作成されます。
 
 登録後、Actions タブから `Deploy to Cloudflare Workers` を手動実行（Run workflow）するか、このブランチへpushすると自動デプロイされます。
 
