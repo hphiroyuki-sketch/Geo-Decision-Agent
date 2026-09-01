@@ -122,20 +122,13 @@ export default function Layout() {
       </aside>
 
       {/* Mobile top bar */}
-      <header className="md:hidden flex items-center justify-between px-4 h-14 shrink-0 bg-[var(--gda-navy)]">
+      <header className="md:hidden flex items-center px-4 h-14 shrink-0 bg-[var(--gda-navy)]">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-md bg-[var(--gda-green)] flex items-center justify-center text-white font-bold text-sm shrink-0">
             G
           </div>
           <div className="text-white font-semibold text-sm truncate">Geo Decision Agent</div>
         </div>
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="text-slate-300 p-2 -mr-2"
-          aria-label="メニューを開く"
-        >
-          <Menu size={22} />
-        </button>
       </header>
 
       {/* Mobile slide-over drawer */}
