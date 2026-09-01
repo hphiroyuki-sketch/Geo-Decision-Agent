@@ -13,6 +13,9 @@ export type Basemap = "satellite" | "streets";
 /** How mesh cells are coloured: by class, or as a heatmap of one measure. */
 export type MeshColorMode = "class" | "similarity" | "change";
 
+/** What a 3D column's height encodes, or "flat" for a draped 2D mesh. */
+export type MeshHeightMode = "flat" | "similarity" | "change";
+
 export interface CellProperties {
   cellClass: string;
   label: string;
@@ -41,6 +44,10 @@ interface MapViewProps {
   onMapClick?: (lat: number, lng: number) => void;
   fitBounds?: [[number, number], [number, number]] | null;
   maxFitZoom?: number;
+  /** Real terrain relief, tilted view and sky - the Google Earth-like read. */
+  terrain3d?: boolean;
+  terrainExaggeration?: number;
+  meshHeightMode?: MeshHeightMode;
 }
 
 // Imagery: GSI (Geospatial Information Authority of Japan) seamless photo is
@@ -93,7 +100,42 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
+// Elevation tiles for 3D terrain. Terrarium encoding, no API key, global
+// coverage to z15 - coarser than the imagery, so relief stays readable while
+// individual 10m cells do not get their own landform.
+const DEM_SOURCE: maplibregl.RasterDEMSourceSpecification = {
+  type: "raster-dem",
+  tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+  encoding: "terrarium",
+  tileSize: 256,
+  maxzoom: 15,
+  attribution: "Elevation: Mapzen / AWS Terrain Tiles",
+};
+
 const MESH_SOURCE = "mesh";
+const DEM_SOURCE_ID = "dem";
+
+/** Column height in metres. Scaled so a full-range value reads clearly against
+ *  10m cells without turning the mesh into a wall. */
+const MAX_COLUMN_M = 120;
+
+function extrusionHeight(mode: MeshHeightMode): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  if (mode === "similarity") {
+    return [
+      "case",
+      ["==", ["get", "similarity"], null],
+      0,
+      ["*", ["max", ["to-number", ["get", "similarity"], 0], 0], MAX_COLUMN_M],
+    ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>;
+  }
+  // Change is a much smaller number, so it needs its own scale to be visible.
+  return [
+    "case",
+    ["==", ["get", "change"], null],
+    0,
+    ["*", ["max", ["to-number", ["get", "change"], 0], 0], MAX_COLUMN_M * 3],
+  ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>;
+}
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
 // Heatmap ramps. Similarity runs pale→green (more like confirmed habitat is
@@ -136,6 +178,9 @@ export default function MapView({
   onMapClick,
   fitBounds = null,
   maxFitZoom = 18,
+  terrain3d = false,
+  terrainExaggeration = 1.5,
+  meshHeightMode = "flat",
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -159,7 +204,8 @@ export default function MapView({
       maxZoom: 19,
       attributionControl: { compact: true },
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    // The compass earns its place once the view can be tilted and rotated.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
     mapRef.current = map;
 
@@ -177,6 +223,25 @@ export default function MapView({
         source: MESH_SOURCE,
         paint: { "line-color": "#ffffff", "line-width": 0.4, "line-opacity": 0.5 },
       });
+      // Columns for the 3D read; hidden until a height measure is chosen.
+      map.addLayer({
+        id: "mesh-extrusion",
+        type: "fill-extrusion",
+        source: MESH_SOURCE,
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": fillColor(meshColorMode),
+          "fill-extrusion-height": extrusionHeight("similarity"),
+          "fill-extrusion-base": 0,
+          "fill-extrusion-opacity": 0.85,
+        },
+      });
+      map.addSource(DEM_SOURCE_ID, DEM_SOURCE);
+      map.addLayer({
+        id: "sky",
+        type: "sky",
+        paint: { "sky-color": "#8fb8de", "sky-horizon-blend": 0.5, "horizon-color": "#dfeaf5", "horizon-fog-blend": 0.6 },
+      } as unknown as maplibregl.LayerSpecification);
       readyRef.current = true;
       map.resize();
 
@@ -235,10 +300,41 @@ export default function MapView({
       map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible ? "visible" : "none");
       map.setPaintProperty("mesh-fill", "fill-opacity", meshOpacity);
       map.setPaintProperty("mesh-fill", "fill-color", fillColor(meshColorMode));
+
+      // Flat and extruded are mutually exclusive readings of the same cells:
+      // showing both stacks two colours on one square and reads as neither.
+      const extruded = meshVisible && meshHeightMode !== "flat";
+      map.setLayoutProperty("mesh-extrusion", "visibility", extruded ? "visible" : "none");
+      map.setLayoutProperty("mesh-fill", "visibility", meshVisible && !extruded ? "visible" : "none");
+      map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible && !extruded ? "visible" : "none");
+      if (extruded) {
+        map.setPaintProperty("mesh-extrusion", "fill-extrusion-color", fillColor(meshColorMode));
+        map.setPaintProperty("mesh-extrusion", "fill-extrusion-height", extrusionHeight(meshHeightMode));
+      }
     };
     if (readyRef.current) apply();
     else map.once("load", apply);
-  }, [mesh, meshVisible, meshOpacity, gridVisible, meshColorMode]);
+  }, [mesh, meshVisible, meshOpacity, gridVisible, meshColorMode, meshHeightMode]);
+
+  // Terrain relief plus a tilted camera. Turning it off restores the flat,
+  // straight-down view rather than leaving the camera pitched.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      if (terrain3d) {
+        map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
+        map.setLayoutProperty("sky", "visibility", "visible");
+        if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
+      } else {
+        map.setTerrain(null);
+        map.setLayoutProperty("sky", "visibility", "none");
+        if (map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+      }
+    };
+    if (readyRef.current) apply();
+    else map.once("load", apply);
+  }, [terrain3d, terrainExaggeration]);
 
   useEffect(() => {
     const map = mapRef.current;

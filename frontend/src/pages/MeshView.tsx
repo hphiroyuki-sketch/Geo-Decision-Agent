@@ -11,9 +11,17 @@ import {
   ShieldCheck,
   Crosshair,
   MapPin,
+  Box,
+  Mountain,
 } from "lucide-react";
 import { api } from "../lib/api";
-import MapView, { type Basemap, type CellProperties, type MapMarker, type MeshColorMode } from "../components/MapView";
+import MapView, {
+  type Basemap,
+  type CellProperties,
+  type MapMarker,
+  type MeshColorMode,
+  type MeshHeightMode,
+} from "../components/MapView";
 import { Term, Hint, EmptyState } from "../components/Explain";
 
 interface MeshRow {
@@ -122,6 +130,9 @@ export default function MeshView() {
   const [labelsVisible, setLabelsVisible] = useState(true);
   const [opacity, setOpacity] = useState(0.6);
   const [colorMode, setColorMode] = useState<MeshColorMode>("class");
+  const [terrain3d, setTerrain3d] = useState(false);
+  const [heightMode, setHeightMode] = useState<MeshHeightMode>("flat");
+  const [exaggeration, setExaggeration] = useState(1.5);
   const [selected, setSelected] = useState<CellProperties | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -619,6 +630,9 @@ export default function MeshView() {
           markers={markers}
           fitBounds={bounds}
           maxFitZoom={18}
+          terrain3d={terrain3d}
+          terrainExaggeration={exaggeration}
+          meshHeightMode={heightMode}
           onCellClick={setSelected}
           onMapClick={
             pickOnMap
@@ -671,6 +685,72 @@ export default function MeshView() {
                   >
                     地図
                   </button>
+                </div>
+
+                <div className="border-t border-slate-100 pt-2.5">
+                  <label className="flex items-center justify-between text-[11px] font-medium text-slate-700">
+                    <span className="flex items-center gap-1.5">
+                      <Mountain size={12} /> 3D地形表示
+                    </span>
+                    <input type="checkbox" checked={terrain3d} onChange={(e) => setTerrain3d(e.target.checked)} />
+                  </label>
+                  {terrain3d && (
+                    <div className="mt-1.5">
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span>起伏の強調</span>
+                        <span>×{exaggeration.toFixed(1)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={3}
+                        step={0.1}
+                        value={exaggeration}
+                        onChange={(e) => setExaggeration(Number(e.target.value))}
+                        className="w-full accent-[var(--gda-green)]"
+                      />
+                      <p className="text-[10px] text-slate-400 leading-snug">
+                        右ドラッグ（またはCtrl+ドラッグ）で視点を傾け・回転できます。標高データは約30m解像度のため、
+                        尾根・谷の把握には十分ですが、10mマス1つ分の起伏までは再現されません。
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
+                    <Box size={11} /> マスの高さ
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(
+                      [
+                        ["flat", "平面"],
+                        ["similarity", "類似度"],
+                        ["change", "変化"],
+                      ] as [MeshHeightMode, string][]
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        onClick={() => {
+                          setHeightMode(mode);
+                          if (mode !== "flat") setTerrain3d(true);
+                        }}
+                        className={`text-[11px] py-1 rounded-lg border ${
+                          heightMode === mode
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-600 border-slate-200"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {heightMode !== "flat" && (
+                    <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                      柱の高さ＝{heightMode === "similarity" ? "類似度（高いほど確認済み生息地に近い）" : "変化スコア（高いほど前年から変化）"}
+                      。高さは表示用に強調しており、実際の標高ではありません。
+                    </p>
+                  )}
                 </div>
 
                 <div>
