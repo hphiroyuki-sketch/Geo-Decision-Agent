@@ -9,6 +9,8 @@ import { chatRoutes } from "./routes/chat";
 import { fieldRecordRoutes } from "./routes/fieldRecords";
 import { meshRoutes } from "./routes/mesh";
 import { dashboardRoutes } from "./routes/dashboard";
+import { alertRoutes } from "./routes/alerts";
+import { runSystemChecks, generateAlerts } from "./lib/scheduled";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -31,6 +33,9 @@ app.use("/api/meshes/*", requireAuth);
 app.use("/api/recovery-actions/*", requireAuth);
 app.route("/api", meshRoutes);
 
+app.use("/api/alerts/*", requireAuth);
+app.route("/api/alerts", alertRoutes);
+
 app.use("/api/dashboard/*", requireAuth);
 app.route("/api/dashboard", dashboardRoutes);
 
@@ -42,4 +47,19 @@ app.route("/api/admin", adminRoutes);
 
 app.get("/api/health", (c) => c.json({ ok: true, app: c.env.APP_NAME }));
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /**
+   * Cron entry point. Runs the Earth Engine self-checks and refreshes alerts,
+   * so a broken expression graph or a standing threshold breach is recorded
+   * without anyone having to open a page.
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      (async () => {
+        await runSystemChecks(env);
+        await generateAlerts(env);
+      })(),
+    );
+  },
+};

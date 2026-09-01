@@ -30,3 +30,9 @@ DEFAULT_USD_JPY_RATE = "155"
 #   SESSION_SECRET        - HMAC secret for signed session cookies
 #   EE_SERVICE_ACCOUNT_JSON - Google service account JSON key with Earth Engine access (optional; falls back to simulated data when unset)
 #   EE_PROJECT_ID           - GCP project registered for Earth Engine (optional; defaults to the service account's own project)
+
+# Scheduled self-checks and alert evaluation. Five minutes while the Earth
+# Engine expression graphs are still being verified against the live API;
+# hourly is the steady-state setting once they are green.
+[triggers]
+crons = ["*/5 * * * *"]

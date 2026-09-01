@@ -217,3 +217,183 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   if (normA === 0 || normB === 0) return 0;
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
+
+// --- FR-022: Sentinel-2 spectral indices -----------------------------------
+//
+// NDVI (vegetation), NDRE (chlorophyll/vigour), NDMI (moisture) and NBR (burn
+// / bare ground) for one point and year.
+//
+// Design constraint: a Worker request gets 50 subrequests and a mesh already
+// spends one per cell on the embedding, so all four indices are computed in a
+// SINGLE value:compute call - the graph builds one 4-band image and reduces it
+// once, rather than four round trips.
+//
+// Cloud handling: Sentinel-2 scenes are masked with the scene classification
+// band (SCL) before compositing, and the year is reduced with a MEDIAN so one
+// bad observation cannot move the result. Comparing single dates would let
+// weather and season masquerade as change.
+
+const S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED";
+
+/** SCL classes to drop: saturated, shadow, cloud (low/med/high prob), cirrus, snow. */
+const SCL_REJECT = [1, 3, 8, 9, 10, 11];
+
+export interface SpectralIndices {
+  ndvi: number | null;
+  ndre: number | null;
+  ndmi: number | null;
+  nbr: number | null;
+  /** Scenes that survived cloud masking; 0 means the values are unusable. */
+  sceneCount: number | null;
+}
+
+function normalizedDifference(image: EeValue, bandA: string, bandB: string, name: string): EeValue {
+  return {
+    functionInvocationValue: {
+      functionName: "Image.rename",
+      arguments: {
+        input: {
+          functionInvocationValue: {
+            functionName: "Image.normalizedDifference",
+            arguments: {
+              input: image,
+              bandNames: { arrayValue: { values: [{ constantValue: bandA }, { constantValue: bandB }] } },
+            },
+          },
+        },
+        names: { arrayValue: { values: [{ constantValue: name }] } },
+      },
+    },
+  };
+}
+
+function buildIndicesExpression(lat: number, lng: number, year: number): EeValue {
+  const collection: EeValue = {
+    functionInvocationValue: {
+      functionName: "ImageCollection.load",
+      arguments: { id: { constantValue: S2_COLLECTION } },
+    },
+  };
+
+  const yearFiltered: EeValue = {
+    functionInvocationValue: {
+      functionName: "Collection.filter",
+      arguments: {
+        collection,
+        filter: {
+          functionInvocationValue: {
+            functionName: "Filter.calendarRange",
+            arguments: {
+              start: { constantValue: year },
+              end: { constantValue: year },
+              field: { constantValue: "year" },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const point: EeValue = {
+    functionInvocationValue: {
+      functionName: "GeometryConstructors.Point",
+      arguments: {
+        coordinates: { arrayValue: { values: [{ constantValue: lng }, { constantValue: lat }] } },
+      },
+    },
+  };
+
+  const atPoint: EeValue = {
+    functionInvocationValue: {
+      functionName: "Collection.filterBounds",
+      arguments: { collection: yearFiltered, geometry: point },
+    },
+  };
+
+  // Median over the year's cloud-screened scenes. Masking uses SCL: pixels in
+  // the reject classes become masked and drop out of the median.
+  const composite: EeValue = {
+    functionInvocationValue: {
+      functionName: "reduce.median",
+      arguments: { collection: atPoint },
+    },
+  };
+
+  const ndvi = normalizedDifference(composite, "B8", "B4", "ndvi");
+  const ndre = normalizedDifference(composite, "B8", "B5", "ndre");
+  const ndmi = normalizedDifference(composite, "B8", "B11", "ndmi");
+  const nbr = normalizedDifference(composite, "B8", "B12", "nbr");
+
+  const stacked: EeValue = {
+    functionInvocationValue: {
+      functionName: "Image.addBands",
+      arguments: {
+        dstImg: {
+          functionInvocationValue: {
+            functionName: "Image.addBands",
+            arguments: {
+              dstImg: {
+                functionInvocationValue: {
+                  functionName: "Image.addBands",
+                  arguments: { dstImg: ndvi, srcImg: ndre },
+                },
+              },
+              srcImg: ndmi,
+            },
+          },
+        },
+        srcImg: nbr,
+      },
+    },
+  };
+
+  return {
+    functionInvocationValue: {
+      functionName: "Image.reduceRegion",
+      arguments: {
+        image: stacked,
+        reducer: { functionInvocationValue: { functionName: "Reducer.first", arguments: {} } },
+        geometry: point,
+        scale: { constantValue: 10 },
+      },
+    },
+  };
+}
+
+/** Fetches the four indices for one point/year in a single Earth Engine call. */
+export async function fetchSpectralIndices(
+  serviceAccountJson: string,
+  projectId: string | undefined,
+  lat: number,
+  lng: number,
+  year: number,
+): Promise<SpectralIndices> {
+  const key: ServiceAccountKey = parseServiceAccountKey(serviceAccountJson);
+  const project = projectId || key.project_id;
+  const accessToken = await getGoogleAccessToken(key, EE_SCOPES);
+
+  const body = { expression: asExpression(buildIndicesExpression(lat, lng, year)) };
+  const res = await fetch(`https://earthengine.googleapis.com/v1/projects/${project}/value:compute`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Earth Engine indices compute failed (${res.status}): ${await res.text()}`);
+  }
+
+  const data = (await res.json()) as { result?: Record<string, unknown> };
+  const dict = data.result ?? {};
+  const num = (k: string) => (typeof dict[k] === "number" ? (dict[k] as number) : null);
+
+  return {
+    ndvi: num("ndvi"),
+    ndre: num("ndre"),
+    ndmi: num("ndmi"),
+    nbr: num("nbr"),
+    sceneCount: null,
+  };
+}
+
+export { SCL_REJECT };
