@@ -44,6 +44,11 @@ fieldRecordRoutes.post("/projects/:id/field-records", async (c) => {
     return c.json({ error: "位置情報（緯度・経度）が取得できませんでした。" }, 400);
   }
 
+  const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // 8MB - generous for a phone camera photo, small enough to avoid abuse
+  if (body.photoBase64 && body.photoBase64.length * 0.75 > MAX_PHOTO_BYTES) {
+    return c.json({ error: "写真のサイズが大きすぎます（8MBまで）。" }, 400);
+  }
+
   const id = newId("fld");
   let photoKey: string | null = null;
   let photoContentType: string | null = null;
