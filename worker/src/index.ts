@@ -7,6 +7,8 @@ import { adminRoutes } from "./routes/admin";
 import { projectRoutes } from "./routes/projects";
 import { chatRoutes } from "./routes/chat";
 import { fieldRecordRoutes } from "./routes/fieldRecords";
+import { meshRoutes } from "./routes/mesh";
+import { dashboardRoutes } from "./routes/dashboard";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -22,6 +24,15 @@ app.route("/api/projects", projectRoutes);
 
 app.use("/api/field-records/*", requireAuth);
 app.route("/api", fieldRecordRoutes);
+
+// Mesh endpoints are addressed both per project and per mesh, so they mount at
+// the API root and each prefix they own is guarded here.
+app.use("/api/meshes/*", requireAuth);
+app.use("/api/recovery-actions/*", requireAuth);
+app.route("/api", meshRoutes);
+
+app.use("/api/dashboard/*", requireAuth);
+app.route("/api/dashboard", dashboardRoutes);
 
 app.use("/api/conversations/*", requireAuth);
 app.route("/api/conversations", chatRoutes);

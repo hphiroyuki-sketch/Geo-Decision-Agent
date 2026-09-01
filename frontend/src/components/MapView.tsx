@@ -8,66 +8,147 @@ export interface MapMarker {
   color?: string;
 }
 
+export type Basemap = "satellite" | "streets";
+
+export interface CellProperties {
+  cellClass: string;
+  label: string;
+  color: string;
+  similarity: number | null;
+  change: number | null;
+  fieldRecords: number;
+  hotspotId: string | null;
+}
+
 interface MapViewProps {
   center: [number, number];
   zoom?: number;
   markers?: MapMarker[];
   className?: string;
+  basemap?: Basemap;
+  /** FeatureCollection of mesh cells; each feature carries a `color` property. */
+  mesh?: GeoJSON.FeatureCollection | null;
+  meshVisible?: boolean;
+  meshOpacity?: number;
+  /** Draws the cell borders that make the 10m grid readable as a grid. */
+  gridVisible?: boolean;
+  labelsVisible?: boolean;
+  onCellClick?: (props: CellProperties) => void;
+  fitBounds?: [[number, number], [number, number]] | null;
 }
 
-// Raster basemap defined inline rather than fetching a hosted style.json.
-// The previous CARTO vector style loaded its metadata fine (attribution and
-// controls rendered) but painted nothing - its vector tile endpoint is the
-// part that now needs an API key. Raster tiles from OSM need no key, so the
-// map has no external style/key dependency at all.
-//
-// NOTE: OSM's tile policy is meant for modest traffic. Before selling this,
-// move to a paid tile plan (MapTiler / CARTO with key / Mapbox) and just
-// swap TILE_URL + TILE_ATTRIBUTION below.
-const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
-const BASEMAP_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    basemap: {
-      type: "raster",
-      tiles: [TILE_URL],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: TILE_ATTRIBUTION,
-    },
+// Raster basemaps, both keyless. Imagery is what makes the 10m mesh legible as
+// ground rather than as abstract squares, so it is the default for mesh views.
+const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
+  satellite: {
+    type: "raster",
+    tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    tileSize: 256,
+    maxzoom: 19,
+    attribution: "Esri, Maxar, Earthstar Geographics",
   },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }],
+  streets: {
+    type: "raster",
+    tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+    tileSize: 256,
+    maxzoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
+  // Place names and boundaries drawn over imagery; transparent elsewhere.
+  labels: {
+    type: "raster",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    ],
+    tileSize: 256,
+    maxzoom: 19,
+    attribution: "Esri",
+  },
 };
 
-export default function MapView({ center, zoom = 6, markers = [], className }: MapViewProps) {
+const BASE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: SOURCES,
+  layers: [
+    { id: "streets", type: "raster", source: "streets", layout: { visibility: "none" } },
+    { id: "satellite", type: "raster", source: "satellite" },
+    { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.9 } },
+  ],
+};
+
+const MESH_SOURCE = "mesh";
+const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+export default function MapView({
+  center,
+  zoom = 6,
+  markers = [],
+  className,
+  basemap = "streets",
+  mesh = null,
+  meshVisible = true,
+  meshOpacity = 0.55,
+  gridVisible = true,
+  labelsVisible = true,
+  onCellClick,
+  fitBounds = null,
+}: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRefs = useRef<maplibregl.Marker[]>([]);
+  const readyRef = useRef(false);
+  const onCellClickRef = useRef(onCellClick);
+  onCellClickRef.current = onCellClick;
 
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
     const map = new maplibregl.Map({
       container,
-      style: BASEMAP_STYLE,
+      style: BASE_STYLE,
       center: [center[1], center[0]],
       zoom,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
     mapRef.current = map;
 
-    // If the container is laid out (or resized) after the map initialises, the
-    // canvas keeps its stale size and paints blank while the DOM controls still
-    // position correctly - so keep the canvas in sync with the container.
+    map.on("load", () => {
+      map.addSource(MESH_SOURCE, { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "mesh-fill",
+        type: "fill",
+        source: MESH_SOURCE,
+        paint: { "fill-color": ["get", "color"], "fill-opacity": meshOpacity },
+      });
+      map.addLayer({
+        id: "mesh-outline",
+        type: "line",
+        source: MESH_SOURCE,
+        paint: { "line-color": "#ffffff", "line-width": 0.4, "line-opacity": 0.5 },
+      });
+      readyRef.current = true;
+      map.resize();
+
+      map.on("click", "mesh-fill", (e) => {
+        const feature = e.features?.[0];
+        if (feature && onCellClickRef.current) {
+          onCellClickRef.current(feature.properties as unknown as CellProperties);
+        }
+      });
+      map.on("mouseenter", "mesh-fill", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "mesh-fill", () => (map.getCanvas().style.cursor = ""));
+    });
+
+    // A container laid out (or resized) after init otherwise leaves the canvas
+    // at a stale size and paints blank.
     const observer = new ResizeObserver(() => map.resize());
     observer.observe(container);
-    map.once("load", () => map.resize());
 
     return () => {
       observer.disconnect();
+      readyRef.current = false;
       map.remove();
       mapRef.current = null;
     };
@@ -77,9 +158,46 @@ export default function MapView({ center, zoom = 6, markers = [], className }: M
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const apply = () => {
+      map.setLayoutProperty("satellite", "visibility", basemap === "satellite" ? "visible" : "none");
+      map.setLayoutProperty("streets", "visibility", basemap === "streets" ? "visible" : "none");
+      // Imagery has no place names of its own, so the label layer only earns
+      // its place over satellite.
+      map.setLayoutProperty(
+        "labels",
+        "visibility",
+        labelsVisible && basemap === "satellite" ? "visible" : "none",
+      );
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once("load", apply);
+  }, [basemap, labelsVisible]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      const source = map.getSource(MESH_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData(mesh ?? EMPTY);
+      map.setLayoutProperty("mesh-fill", "visibility", meshVisible ? "visible" : "none");
+      map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible ? "visible" : "none");
+      map.setPaintProperty("mesh-fill", "fill-opacity", meshOpacity);
+    };
+    if (readyRef.current) apply();
+    else map.once("load", apply);
+  }, [mesh, meshVisible, meshOpacity, gridVisible]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (fitBounds) {
+      map.fitBounds(fitBounds, { padding: 40, duration: 600, maxZoom: 18 });
+      return;
+    }
     map.setCenter([center[1], center[0]]);
     map.setZoom(zoom);
-  }, [center, zoom]);
+  }, [center, zoom, fitBounds]);
 
   useEffect(() => {
     const map = mapRef.current;

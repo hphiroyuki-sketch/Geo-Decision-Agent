@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  Sprout,
   Home,
   FolderKanban,
   Map,
-  BarChart3,
   Database,
   FileText,
   Bell,
-  Share2,
   Settings,
   ShieldCheck,
   LogOut,
@@ -64,14 +63,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <nav className="flex-1 space-y-1">
-        <NavItem to="/" icon={Home} label="ホーム" onClick={onNavigate} />
+        <NavItem to="/dashboard" icon={Home} label="ホーム" onClick={onNavigate} />
         <NavItem to="/" icon={FolderKanban} label="プロジェクト" onClick={onNavigate} />
-        <NavItem to="#" icon={Map} label="地図ビュー" disabled />
-        <NavItem to="#" icon={BarChart3} label="分析" disabled />
-        <NavItem to="#" icon={Database} label="データ" disabled />
-        <NavItem to="#" icon={FileText} label="レポート" disabled />
-        <NavItem to="#" icon={Bell} label="アラート" disabled />
-        <NavItem to="#" icon={Share2} label="共有" disabled />
+        <NavItem to="/map" icon={Map} label="地図ビュー" onClick={onNavigate} />
+        <NavItem to="/recovery" icon={Sprout} label="回復計画" onClick={onNavigate} />
+        <NavItem to="/data" icon={Database} label="データ" onClick={onNavigate} />
+        <NavItem to="/reports" icon={FileText} label="レポート" onClick={onNavigate} />
+        <NavItem to="/alerts" icon={Bell} label="アラート" onClick={onNavigate} />
         {user?.role === "admin" && <NavItem to="/admin" icon={Settings} label="管理設定" onClick={onNavigate} />}
       </nav>
       <div className="px-2 pt-2 border-t border-white/10 mt-2">
@@ -154,7 +152,7 @@ export default function Layout() {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--gda-navy)] border-t border-white/10 flex items-stretch h-16">
         <NavLink
-          to="/"
+          to="/dashboard"
           className={({ isActive }) =>
             `flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] ${
               isActive ? "text-[var(--gda-green)]" : "text-slate-400"
@@ -174,6 +172,17 @@ export default function Layout() {
         >
           <FolderKanban size={20} />
           プロジェクト
+        </NavLink>
+        <NavLink
+          to="/alerts"
+          className={({ isActive }) =>
+            `flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] ${
+              isActive ? "text-[var(--gda-green)]" : "text-slate-400"
+            }`
+          }
+        >
+          <Bell size={20} />
+          アラート
         </NavLink>
         {user?.role === "admin" && (
           <NavLink

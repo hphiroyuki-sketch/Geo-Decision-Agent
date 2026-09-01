@@ -9,6 +9,13 @@ import AnalysisResults from "./pages/AnalysisResults";
 import DecisionReport from "./pages/DecisionReport";
 import FieldSurvey from "./pages/FieldSurvey";
 import Admin from "./pages/Admin";
+import Dashboard from "./pages/Dashboard";
+import MeshView from "./pages/MeshView";
+import RecoveryPlan from "./pages/RecoveryPlan";
+import MapExplorer from "./pages/MapExplorer";
+import DataCatalog from "./pages/DataCatalog";
+import ReportsIndex from "./pages/ReportsIndex";
+import Alerts from "./pages/Alerts";
 
 function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -30,10 +37,18 @@ export default function App() {
       <Route path="/register" element={<Register />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<Home />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/map" element={<MapExplorer />} />
+        <Route path="/data" element={<DataCatalog />} />
+        <Route path="/reports" element={<ReportsIndex />} />
+        <Route path="/alerts" element={<Alerts />} />
+        <Route path="/recovery" element={<RecoveryPlan />} />
         <Route path="/projects/:id" element={<ProjectChat />} />
         <Route path="/projects/:id/analysis" element={<AnalysisResults />} />
         <Route path="/projects/:id/report" element={<DecisionReport />} />
         <Route path="/projects/:id/field" element={<FieldSurvey />} />
+        <Route path="/projects/:id/mesh" element={<MeshView />} />
+        <Route path="/projects/:id/recovery" element={<RecoveryPlan />} />
         <Route path="/admin" element={<Admin />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

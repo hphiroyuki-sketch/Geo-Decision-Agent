@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera } from "lucide-react";
+import { Send, BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera, Grid3x3 } from "lucide-react";
 import { api, streamChat } from "../lib/api";
 import MapView, { type MapMarker } from "../components/MapView";
 
@@ -188,6 +188,12 @@ export default function ProjectChat() {
           >
             <Camera size={14} /> 現地記録
           </Link>
+          <Link
+            to={`/projects/${id}/mesh`}
+            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
+          >
+            <Grid3x3 size={14} /> 10mメッシュ
+          </Link>
           {candidates.length > 0 && (
             <>
               <Link
@@ -231,8 +237,9 @@ export default function ProjectChat() {
         </div>
         <MapView
           center={project ? [project.center_lat, project.center_lng] : [36.2048, 138.2529]}
-          zoom={project ? 11 : 5}
+          zoom={project ? 13 : 5}
           markers={markers}
+          basemap="satellite"
         />
       </div>
     </div>
