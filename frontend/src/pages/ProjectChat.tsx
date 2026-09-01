@@ -156,9 +156,29 @@ export default function ProjectChat() {
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-thin">
           {messages.length === 0 && (
-            <div className="text-xs text-slate-400 leading-relaxed">
-              例:「関東地方のこの3候補地に新しい発電所を建てる場合、生態系への影響が最も小さいのはどこか。回避・低減の具体策も教えて」
-              のように、自然言語で質問してください。
+            <div className="space-y-3">
+              <div className="text-xs text-slate-500 leading-relaxed">
+                専門用語は不要です。ふだんの言葉で聞いてください。AIは条件が足りなければ聞き返します。
+              </div>
+              <div className="space-y-1.5">
+                {[
+                  "この2地点を比較して。生態系への影響が小さいのはどちらか、回避・低減の具体策も教えて",
+                  "この土地で保全すべき場所と、回復に取り組むべき場所を教えて",
+                  "34.7241, 135.4894 の周辺で、設備を置いても影響が小さい区域はどこか",
+                  "分かる範囲で暫定分析して。不確実な点も一緒に示して",
+                ].map((example) => (
+                  <button
+                    key={example}
+                    onClick={() => setInput(example)}
+                    className="w-full text-left text-[11px] text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-2 leading-relaxed"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] text-slate-400 leading-relaxed">
+                数値はAIが作文するのではなく、構造化された分析ツールを呼び出して算出します。実データか推定値かは回答内に明示されます。
+              </div>
             </div>
           )}
           {messages.map((m) => (
@@ -204,10 +224,10 @@ export default function ProjectChat() {
                 <BarChart3 size={14} /> 分析結果
               </Link>
               <Link
-                to={`/projects/${id}/report`}
+                to={`/projects/${id}/leap`}
                 className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
               >
-                <FileText size={14} /> レポート
+                <FileText size={14} /> TNFD出力
               </Link>
             </>
           )}

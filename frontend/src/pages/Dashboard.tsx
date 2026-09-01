@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Grid3x3, TriangleAlert, Sprout, ShieldCheck, ChevronRight, Satellite } from "lucide-react";
 import { api } from "../lib/api";
 import MapView, { type Basemap, type MapMarker } from "../components/MapView";
+import { Hint, Term } from "../components/Explain";
 
 interface Kpi {
   key: string;
@@ -127,6 +128,12 @@ export default function Dashboard() {
         <div className="text-[11px] text-slate-400">{new Date().toLocaleString("ja-JP")}</div>
       </div>
 
+      <Hint tone="info">
+        この画面は<strong>全案件を横断した現在地</strong>です。左から順に「どれだけ見ているか」「今すぐ手当てが要るか」
+        「回復の伸びしろがあるか」「守るべき場所があるか」を表します。数字はすべてシステムが実際に保持している記録を
+        数えたもので、推計値ではありません。まず<strong>「要確認」</strong>を見て、0でなければ右の一覧から着手してください。
+      </Hint>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {kpis.map((k) => {
           const Icon = KPI_ICON[k.key] ?? Grid3x3;
@@ -137,7 +144,9 @@ export default function Dashboard() {
                   <Icon size={17} />
                 </span>
                 <div className="min-w-0">
-                  <div className="text-[11px] text-slate-500">{k.label}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {k.key === "protect" || k.key === "recovery" ? <Term id="similarity">{k.label}</Term> : k.label}
+                  </div>
                   <div className="text-xl font-semibold text-slate-800 leading-tight">
                     {k.value.toLocaleString()}
                     <span className="text-[11px] font-normal text-slate-400 ml-1">{k.unit}</span>
