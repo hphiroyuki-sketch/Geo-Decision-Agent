@@ -120,46 +120,128 @@ const DEM_SOURCE_ID = "dem";
 const MAX_COLUMN_M = 120;
 
 function extrusionHeight(mode: MeshHeightMode): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  if (mode === "similarity") {
-    return [
-      "case",
-      ["==", ["get", "similarity"], null],
-      0,
-      ["*", ["max", ["to-number", ["get", "similarity"], 0], 0], MAX_COLUMN_M],
-    ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>;
-  }
-  // Change is a much smaller number, so it needs its own scale to be visible.
+  const field = mode === "change" ? "chgValue" : "simValue";
+  // Change spans a far smaller range than similarity, so it needs its own
+  // scale to stand up visibly against 10m cells.
+  const scale = mode === "change" ? MAX_COLUMN_M * 3 : MAX_COLUMN_M;
   return [
     "case",
-    ["==", ["get", "change"], null],
+    ["<", ["to-number", ["get", field], -1], 0],
     0,
-    ["*", ["max", ["to-number", ["get", "change"], 0], 0], MAX_COLUMN_M * 3],
+    ["*", ["max", ["to-number", ["get", field], 0], 0], scale],
   ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>;
 }
+
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
 // Heatmap ramps. Similarity runs pale→green (more like confirmed habitat is
-// better); change runs pale→red (more change needs more attention). A missing
-// value falls back to grey rather than to an end of the ramp, so "no data"
-// never reads as "zero".
-const SIMILARITY_RAMP: maplibregl.DataDrivenPropertyValueSpecification<string> = [
+// better); change runs pale→red (more change needs more attention).
+//
+// These read `simValue` / `chgValue`, the numeric twins the API emits, and
+// treat anything below 0 as "no value" so it renders grey rather than as an
+// end of the ramp. They must never compare against null: a null in a style
+// expression throws when the layer is added, and losing the layer loses the
+// whole mesh overlay while every other part of the screen keeps working.
+const SIMILARITY_RAMP = [
   "case",
-  ["==", ["get", "similarity"], null],
+  ["<", ["to-number", ["get", "simValue"], -1], 0],
   "#9ca3af",
-  ["interpolate", ["linear"], ["to-number", ["get", "similarity"], -1], 0, "#f1f8f4", 0.5, "#96ccae", 0.85, "#2f9e63", 1, "#0f5132"],
+  [
+    "interpolate",
+    ["linear"],
+    ["to-number", ["get", "simValue"], 0],
+    0,
+    "#f1f8f4",
+    0.5,
+    "#96ccae",
+    0.85,
+    "#2f9e63",
+    1,
+    "#0f5132",
+  ],
 ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
 
-const CHANGE_RAMP: maplibregl.DataDrivenPropertyValueSpecification<string> = [
+const CHANGE_RAMP = [
   "case",
-  ["==", ["get", "change"], null],
+  ["<", ["to-number", ["get", "chgValue"], -1], 0],
   "#9ca3af",
-  ["interpolate", ["linear"], ["to-number", ["get", "change"], -1], 0, "#fdf5f3", 0.05, "#f0b8a8", 0.15, "#d4623f", 0.3, "#8c2c14"],
+  [
+    "interpolate",
+    ["linear"],
+    ["to-number", ["get", "chgValue"], 0],
+    0,
+    "#fdf5f3",
+    0.05,
+    "#f0b8a8",
+    0.15,
+    "#d4623f",
+    0.3,
+    "#8c2c14",
+  ],
 ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
 
 function fillColor(mode: MeshColorMode): maplibregl.DataDrivenPropertyValueSpecification<string> {
   if (mode === "similarity") return SIMILARITY_RAMP;
   if (mode === "change") return CHANGE_RAMP;
   return ["get", "color"] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>;
+}
+
+/**
+ * Creates the mesh overlay layers. Each is added separately and guarded, so a
+ * renderer that rejects one (extrusions and sky are the fragile ones) still
+ * leaves the flat mesh - the part the analysis is actually read from - drawn.
+ */
+function buildMeshLayers(map: maplibregl.Map, colorMode: MeshColorMode, opacity: number): void {
+  map.addSource(MESH_SOURCE, { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "mesh-fill",
+    type: "fill",
+    source: MESH_SOURCE,
+    paint: { "fill-color": fillColor(colorMode), "fill-opacity": opacity },
+  });
+  map.addLayer({
+    id: "mesh-outline",
+    type: "line",
+    source: MESH_SOURCE,
+    paint: { "line-color": "#ffffff", "line-width": 0.4, "line-opacity": 0.5 },
+  });
+
+  try {
+    // Columns for the 3D read; hidden until a height measure is chosen.
+    map.addLayer({
+      id: "mesh-extrusion",
+      type: "fill-extrusion",
+      source: MESH_SOURCE,
+      layout: { visibility: "none" },
+      paint: {
+        "fill-extrusion-color": fillColor(colorMode),
+        "fill-extrusion-height": extrusionHeight("similarity"),
+        "fill-extrusion-base": 0,
+        "fill-extrusion-opacity": 0.85,
+      },
+    });
+  } catch (err) {
+    console.error("extrusion layer unavailable", err);
+  }
+
+  try {
+    map.addSource(DEM_SOURCE_ID, DEM_SOURCE);
+    // The sky only shows once the camera is pitched, so it is added once and
+    // left alone: a sky layer has no layout properties, and setLayoutProperty
+    // on one throws.
+    map.addLayer({
+      id: "sky",
+      type: "sky",
+      paint: {
+        "sky-color": "#8fb8de",
+        "sky-horizon-blend": 0.5,
+        "horizon-color": "#dfeaf5",
+        "horizon-fog-blend": 0.6,
+      },
+    } as unknown as maplibregl.LayerSpecification);
+  } catch (err) {
+    console.error("terrain/sky layers unavailable", err);
+  }
 }
 
 export default function MapView({
@@ -210,50 +292,12 @@ export default function MapView({
     mapRef.current = map;
 
     map.on("load", () => {
-      map.addSource(MESH_SOURCE, { type: "geojson", data: EMPTY });
-      map.addLayer({
-        id: "mesh-fill",
-        type: "fill",
-        source: MESH_SOURCE,
-        paint: { "fill-color": fillColor(meshColorMode), "fill-opacity": meshOpacity },
-      });
-      map.addLayer({
-        id: "mesh-outline",
-        type: "line",
-        source: MESH_SOURCE,
-        paint: { "line-color": "#ffffff", "line-width": 0.4, "line-opacity": 0.5 },
-      });
-      // Columns for the 3D read; hidden until a height measure is chosen.
-      map.addLayer({
-        id: "mesh-extrusion",
-        type: "fill-extrusion",
-        source: MESH_SOURCE,
-        layout: { visibility: "none" },
-        paint: {
-          "fill-extrusion-color": fillColor(meshColorMode),
-          "fill-extrusion-height": extrusionHeight("similarity"),
-          "fill-extrusion-base": 0,
-          "fill-extrusion-opacity": 0.85,
-        },
-      });
-      map.addSource(DEM_SOURCE_ID, DEM_SOURCE);
-      // The sky only shows once the camera is pitched, so it is added once and
-      // left alone. It is deliberately NOT toggled: a sky layer has no layout
-      // properties, and calling setLayoutProperty on one throws, which would
-      // take the 3D switch down with it.
       try {
-        map.addLayer({
-          id: "sky",
-          type: "sky",
-          paint: {
-            "sky-color": "#8fb8de",
-            "sky-horizon-blend": 0.5,
-            "horizon-color": "#dfeaf5",
-            "horizon-fog-blend": 0.6,
-          },
-        } as unknown as maplibregl.LayerSpecification);
-      } catch {
-        // An older renderer without sky support still gets terrain relief.
+        buildMeshLayers(map, meshColorMode, meshOpacity);
+      } catch (err) {
+        // Never let one layer take the map down with it: the basemap and
+        // markers still have to work if an overlay cannot be created.
+        console.error("mesh layers could not be added", err);
       }
       readyRef.current = true;
       map.resize();
@@ -307,7 +351,7 @@ export default function MapView({
     if (!map) return;
     const apply = () => {
       const source = map.getSource(MESH_SOURCE) as maplibregl.GeoJSONSource | undefined;
-      if (!source) return;
+      if (!source || !map.getLayer("mesh-fill")) return;
       source.setData(mesh ?? EMPTY);
       map.setLayoutProperty("mesh-fill", "visibility", meshVisible ? "visible" : "none");
       map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible ? "visible" : "none");
@@ -316,8 +360,9 @@ export default function MapView({
 
       // Flat and extruded are mutually exclusive readings of the same cells:
       // showing both stacks two colours on one square and reads as neither.
-      const extruded = meshVisible && meshHeightMode !== "flat";
-      map.setLayoutProperty("mesh-extrusion", "visibility", extruded ? "visible" : "none");
+      const hasExtrusion = Boolean(map.getLayer("mesh-extrusion"));
+      const extruded = hasExtrusion && meshVisible && meshHeightMode !== "flat";
+      if (hasExtrusion) map.setLayoutProperty("mesh-extrusion", "visibility", extruded ? "visible" : "none");
       map.setLayoutProperty("mesh-fill", "visibility", meshVisible && !extruded ? "visible" : "none");
       map.setLayoutProperty("mesh-outline", "visibility", meshVisible && gridVisible && !extruded ? "visible" : "none");
       if (extruded) {

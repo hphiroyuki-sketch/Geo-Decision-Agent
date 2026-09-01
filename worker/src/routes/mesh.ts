@@ -330,8 +330,15 @@ meshRoutes.get("/meshes/:meshId", async (c) => {
         cellClass: cell.cell_class,
         label: CELL_CLASS_LABEL[(cell.cell_class ?? "unscored") as CellClass],
         color: CELL_CLASS_COLOR[(cell.cell_class ?? "unscored") as CellClass],
+        // Nullable values for display...
         similarity: cell.reference_similarity,
         change: cell.change_score,
+        // ...and numeric twins for map styling. MapLibre style expressions
+        // cannot compare against null - doing so throws when the layer is
+        // added, which silently costs the entire mesh overlay - so "no value"
+        // is carried as -1, outside both metrics' real range.
+        simValue: cell.reference_similarity ?? -1,
+        chgValue: cell.change_score ?? -1,
         fieldRecords: cell.field_records,
         hotspotId: cell.hotspot_id,
       },
