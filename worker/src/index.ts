@@ -11,6 +11,7 @@ import { meshRoutes } from "./routes/mesh";
 import { dashboardRoutes } from "./routes/dashboard";
 import { alertRoutes } from "./routes/alerts";
 import { runSystemChecks, generateAlerts } from "./lib/scheduled";
+import { newId } from "./lib/crypto";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -54,11 +55,33 @@ export default {
    * so a broken expression graph or a standing threshold breach is recorded
    * without anyone having to open a page.
    */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
-        await runSystemChecks(env);
-        await generateAlerts(env);
+        // Heartbeat first. If the checks below overrun the CPU budget and the
+        // isolate is killed, this row still proves the cron fired at all -
+        // which is otherwise indistinguishable from a trigger that never ran.
+        try {
+          await env.DB.prepare(
+            `INSERT INTO system_checks (id, check_name, ok, message, duration_ms, checked_at)
+             VALUES (?, 'cron_heartbeat', 1, ?, 0, ?)`,
+          )
+            .bind(newId("chk"), `cron ${event.cron ?? ""}`, new Date().toISOString())
+            .run();
+        } catch {
+          // Nothing useful to do here; the run continues either way.
+        }
+
+        try {
+          await runSystemChecks(env);
+        } catch (err) {
+          console.error("system checks failed", err);
+        }
+        try {
+          await generateAlerts(env);
+        } catch (err) {
+          console.error("alert generation failed", err);
+        }
       })(),
     );
   },
