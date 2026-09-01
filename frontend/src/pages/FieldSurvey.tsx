@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Camera, MapPin, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { Camera, MapPin, CheckCircle2, XCircle, Clock, Loader2, Navigation, Target } from "lucide-react";
 import { api } from "../lib/api";
+import { Hint, EmptyState } from "../components/Explain";
 
 interface FieldRecordRow {
   id: string;
@@ -29,9 +30,34 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+interface SurveyTarget {
+  id: string;
+  cellClass: string;
+  areaHa: number;
+  lat: number;
+  lng: number;
+  existingRecords: number;
+  reason: string;
+  priority: "high" | "medium" | "low";
+}
+
+const PRIORITY_STYLE: Record<SurveyTarget["priority"], string> = {
+  high: "border-rose-200 bg-rose-50",
+  medium: "border-amber-200 bg-amber-50",
+  low: "border-emerald-200 bg-emerald-50",
+};
+
+const CLASS_LABEL: Record<string, string> = {
+  changed: "大きな変化（要現地確認）",
+  similar: "類似環境（回復候補）",
+  priority_a: "優先度A（保全優先）",
+};
+
 export default function FieldSurvey() {
   const { id } = useParams<{ id: string }>();
   const [records, setRecords] = useState<FieldRecordRow[]>([]);
+  const [targets, setTargets] = useState<SurveyTarget[]>([]);
+  const [confirming, setConfirming] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [speciesGuess, setSpeciesGuess] = useState("");
@@ -50,6 +76,14 @@ export default function FieldSurvey() {
   };
 
   useEffect(load, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    api
+      .get<{ targets: SurveyTarget[] }>(`/projects/${id}/survey-targets`)
+      .then((r) => setTargets(r.targets))
+      .catch(() => setTargets([]));
+  }, [id]);
 
   const captureLocation = () => {
     setLocationError(null);
@@ -110,6 +144,7 @@ export default function FieldSurvey() {
         body.photoContentType = photoFile.type || "image/jpeg";
       }
       await api.post(`/projects/${id}/field-records`, body);
+      setConfirming(false);
       setSpeciesGuess("");
       setNotes("");
       onPhotoSelected(null);
@@ -134,7 +169,62 @@ export default function FieldSurvey() {
         <p className="text-xs text-slate-500 mt-1">
           現場で撮影した生物・植物の写真とGPS位置を記録します。分析時に衛星データと重ね合わせて評価されます。
         </p>
+        <div className="mt-3">
+          <Hint tone="tip">
+            ここで登録し<strong>査読で「確認済み」にした記録だけ</strong>が、衛星データの比較基準になります。
+            記録が1件もないと、10mメッシュ解析は「変化の検出」しかできません。
+          </Hint>
+        </div>
       </div>
+
+      {targets.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <div className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
+            <Target size={15} className="text-slate-400" /> 確認をおすすめする地点
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1 mb-3">
+            10mメッシュ解析が抽出した区域です。優先度の高い順に並んでいます。座標をタップすると地図アプリで開けます。
+          </p>
+          <div className="space-y-2">
+            {targets.slice(0, 5).map((t) => (
+              <div key={t.id} className={`border rounded-lg p-3 ${PRIORITY_STYLE[t.priority]}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-800">
+                    {CLASS_LABEL[t.cellClass] ?? t.cellClass}
+                    <span className="font-normal text-slate-500"> ・ {t.areaHa.toFixed(2)}ha</span>
+                  </div>
+                  {t.existingRecords > 0 && (
+                    <span className="text-[10px] text-slate-500 shrink-0">記録 {t.existingRecords}件</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">{t.reason}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] font-medium text-[var(--gda-green)] flex items-center gap-1"
+                  >
+                    <Navigation size={11} /> 経路を開く
+                  </a>
+                  <button
+                    onClick={() => {
+                      setManualCoords(`${t.lat.toFixed(6)}, ${t.lng.toFixed(6)}`);
+                      setCoords({ lat: t.lat, lng: t.lng, accuracy: 0 });
+                    }}
+                    className="text-[11px] text-slate-600 underline"
+                  >
+                    この地点で記録する
+                  </button>
+                  <span className="text-[10px] text-slate-400 ml-auto">
+                    {t.lat.toFixed(5)}, {t.lng.toFixed(5)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
         <div>
@@ -246,13 +336,61 @@ export default function FieldSurvey() {
           />
         </div>
 
-        <button
-          onClick={submit}
-          disabled={!coords || submitting}
-          className="w-full bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] disabled:opacity-40 text-white text-sm font-medium py-2.5 rounded-lg"
-        >
-          {submitting ? "送信中..." : "現地記録を登録"}
-        </button>
+        {confirming ? (
+          <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2">
+            <div className="text-xs font-semibold text-slate-700">送信内容の確認</div>
+            <dl className="text-[11px] text-slate-600 space-y-1">
+              <div className="flex justify-between gap-2">
+                <dt>位置</dt>
+                <dd className="font-medium text-right">
+                  {coords?.lat.toFixed(6)}, {coords?.lng.toFixed(6)}
+                  {coords && coords.accuracy > 0 ? `（±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>種候補</dt>
+                <dd className="font-medium text-right">{speciesGuess || "未記入"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>確からしさ</dt>
+                <dd className="font-medium text-right">{taxonConfidence}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>写真</dt>
+                <dd className="font-medium text-right">{photoFile ? "あり" : "なし"}</dd>
+              </div>
+            </dl>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              登録後は査読者が「確認済み」にして初めて分析の根拠になります。位置がずれていると判定全体に影響するため、座標をご確認ください。
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirming(false)}
+                className="flex-1 bg-white border border-slate-300 text-slate-600 text-sm py-2 rounded-lg"
+              >
+                戻って修正
+              </button>
+              <button
+                onClick={submit}
+                disabled={submitting}
+                className="flex-1 bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] disabled:opacity-40 text-white text-sm font-medium py-2 rounded-lg"
+              >
+                {submitting ? "送信中..." : "この内容で登録"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={!coords}
+            className="w-full bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] disabled:opacity-40 text-white text-sm font-medium py-2.5 rounded-lg"
+          >
+            内容を確認して登録
+          </button>
+        )}
+        {!coords && (
+          <p className="text-[11px] text-slate-400 text-center">位置情報を取得または入力すると登録できます。</p>
+        )}
       </div>
 
       <div>
@@ -313,7 +451,11 @@ export default function FieldSurvey() {
             </div>
           ))}
           {records.length === 0 && (
-            <div className="text-center text-slate-400 text-sm py-8">まだ現地記録がありません。</div>
+            <EmptyState
+              icon={Camera}
+              title="まだ現地記録がありません"
+              body="現場で撮影した写真とGPS位置を登録し、査読して「確認済み」にすると、衛星データとの照合の基準になります。互いに離れた複数地点で登録すると、判定の信頼性が上がります。"
+            />
           )}
         </div>
       </div>

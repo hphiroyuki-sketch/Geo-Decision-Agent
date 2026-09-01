@@ -524,3 +524,56 @@ meshRoutes.get("/projects/:id/leap", async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
   }
 });
+
+/**
+ * V-05: the points a surveyor should walk to, drawn from what the mesh
+ * flagged. Sending someone into the field without telling them where to go is
+ * the gap between a satellite finding and a confirmed fact.
+ */
+meshRoutes.get("/projects/:id/survey-targets", async (c) => {
+  const projectId = c.req.param("id");
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT h.id, h.cell_class, h.rank, h.area_ha, h.center_lat, h.center_lng, h.mean_similarity,
+            h.mean_change, h.field_records, m.id AS mesh_id, m.cell_size_m
+     FROM mesh_hotspots h JOIN meshes m ON m.id = h.mesh_id
+     WHERE m.project_id = ? ORDER BY
+       CASE h.cell_class WHEN 'changed' THEN 0 WHEN 'similar' THEN 1 ELSE 2 END, h.importance DESC
+     LIMIT 20`,
+  )
+    .bind(projectId)
+    .all<{
+      id: string;
+      cell_class: string;
+      rank: number;
+      area_ha: number;
+      center_lat: number;
+      center_lng: number;
+      mean_similarity: number | null;
+      mean_change: number | null;
+      field_records: number;
+      mesh_id: string;
+      cell_size_m: number;
+    }>();
+
+  const reasonFor = (row: (typeof results)[number]): string => {
+    if (row.cell_class === "changed")
+      return `前年から大きく変化しています（変化スコア ${row.mean_change?.toFixed(3) ?? "—"}）。原因は衛星では判定できないため、伐採・災害・病虫害・季節差のどれかを現地で確かめてください。`;
+    if (row.cell_class === "similar")
+      return `確認済みの生息環境と中程度に似ています（類似度 ${row.mean_similarity?.toFixed(2) ?? "—"}）。回復施策の対象になり得る区域なので、現況の植生と土壌を確認してください。`;
+    return `保全優先と判定された区域です（類似度 ${row.mean_similarity?.toFixed(2) ?? "—"}）。実際にどの種が生息しているかを記録すると、判定の裏付けになります。`;
+  };
+
+  return c.json({
+    targets: results.map((row) => ({
+      id: row.id,
+      cellClass: row.cell_class,
+      areaHa: row.area_ha,
+      lat: row.center_lat,
+      lng: row.center_lng,
+      existingRecords: row.field_records,
+      reason: reasonFor(row),
+      priority: row.cell_class === "changed" ? "high" : row.cell_class === "similar" ? "medium" : "low",
+    })),
+  });
+});
