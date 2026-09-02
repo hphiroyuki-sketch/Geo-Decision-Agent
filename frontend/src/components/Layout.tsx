@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
+import DisplayModeSwitch from "./DisplayModeSwitch";
 
 function NavItem({
   to,
@@ -138,6 +139,10 @@ export default function Layout() {
             <div className="text-slate-400 text-[11px] leading-tight">限定公開 / MVP</div>
           </div>
         </div>
+        <div className="px-3 pb-3 mb-1">
+          <div className="text-[10px] text-slate-400 mb-1 px-1">表示モード</div>
+          <DisplayModeSwitch />
+        </div>
         <SidebarContent unread={unread} />
       </aside>
 
@@ -148,6 +153,9 @@ export default function Layout() {
             G
           </div>
           <div className="text-white font-semibold text-sm truncate">Geo Decision Agent</div>
+        </div>
+        <div className="ml-auto">
+          <DisplayModeSwitch compact />
         </div>
       </header>
 

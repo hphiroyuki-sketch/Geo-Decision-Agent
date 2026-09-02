@@ -1,5 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+// NFR-010 wants an analysis traceable back to the data, code, model and rules
+// that produced it. These are the version stamps written into every analysis
+// snapshot: bump PROMPT_VERSION whenever buildSystemPrompt changes in a way
+// that could change an answer, so an old result is never silently attributed
+// to today's wording.
+export const PROMPT_VERSION = "2026-09-02";
+export const EMBEDDING_DATASET = "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL";
+export const INDICES_DATASET = "COPERNICUS/S2_SR_HARMONIZED";
+
 export function buildSystemPrompt(appName: string): string {
   return `あなたは「${appName}」の意思決定支援AIです。ForestScope社の理念に基づき、法人が発電所・工場・物流拠点・不動産・送電線等を新設・拡張・改修する際、生物多様性への影響が最小となる選択肢を提示することが使命です。
 

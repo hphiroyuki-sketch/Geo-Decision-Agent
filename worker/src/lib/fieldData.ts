@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { newId } from "./crypto";
-import { fetchEmbeddingVector, cosineSimilarity } from "./earthEngine";
+import { fetchEmbeddingVector, fetchSpectralIndices, cosineSimilarity } from "./earthEngine";
 
 // A site candidate covers tens to hundreds of hectares, and a field observation
 // is a single point somewhere in or near it, so 500m was tight enough that real
@@ -138,3 +138,92 @@ export function distanceToNearestReferencePointM(
 }
 
 export { cosineSimilarity };
+
+// --- FR-022: spectral indices, cached the same way embeddings are -----------
+//
+// Until now these were computed only by the scheduled self-check, which proved
+// the Earth Engine query works but put no number in front of a user: the NDRE
+// change on the analysis screen was still the simulated one. These two helpers
+// put the measured value on the decision path.
+
+export interface CachedIndices {
+  ndvi: number | null;
+  ndre: number | null;
+  ndmi: number | null;
+  nbr: number | null;
+}
+
+const INDEX_KEYS = ["ndvi", "ndre", "ndmi", "nbr"] as const;
+
+function roundPoint(lat: number, lng: number): [number, number] {
+  return [Math.round(lat * 10000) / 10000, Math.round(lng * 10000) / 10000];
+}
+
+/** Real Sentinel-2 indices for one point/year, or null if unavailable. */
+export async function getSpectralIndices(
+  env: Env,
+  db: D1Database,
+  lat: number,
+  lng: number,
+  year: number,
+): Promise<CachedIndices | null> {
+  if (!env.EE_SERVICE_ACCOUNT_JSON) return null;
+  const [rLat, rLng] = roundPoint(lat, lng);
+
+  const cached = await db
+    .prepare("SELECT ndvi, ndre, ndmi, nbr FROM indices_cache WHERE lat = ? AND lng = ? AND year = ?")
+    .bind(rLat, rLng, year)
+    .first<CachedIndices>();
+  if (cached) return cached;
+
+  try {
+    const fresh = await fetchSpectralIndices(env.EE_SERVICE_ACCOUNT_JSON, env.EE_PROJECT_ID, lat, lng, year);
+    // All four null means the year has no usable scene here; caching that would
+    // hide a later fix, so it is returned but not stored.
+    if (INDEX_KEYS.every((k) => fresh[k] === null)) return null;
+    await db
+      .prepare(
+        `INSERT INTO indices_cache (id, lat, lng, year, ndvi, ndre, ndmi, nbr, source, fetched_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'earth_engine', ?)`,
+      )
+      .bind(newId("idx"), rLat, rLng, year, fresh.ndvi, fresh.ndre, fresh.ndmi, fresh.nbr, new Date().toISOString())
+      .run();
+    return { ndvi: fresh.ndvi, ndre: fresh.ndre, ndmi: fresh.ndmi, nbr: fresh.nbr };
+  } catch (err) {
+    console.error("Earth Engine indices fetch failed", err);
+    return null;
+  }
+}
+
+export interface IndexChange {
+  current: CachedIndices;
+  previous: CachedIndices | null;
+  /** Percentage change in NDRE against the previous year, if both years resolved. */
+  ndreChangePct: number | null;
+  year: number;
+  previousYear: number;
+}
+
+/**
+ * Indices for a point this year and last, so "vegetation fell 12%" is a measured
+ * difference rather than an assertion. Two Earth Engine calls at most, both
+ * cached, which keeps a multi-candidate analysis inside the subrequest budget.
+ */
+export async function getIndexChange(
+  env: Env,
+  db: D1Database,
+  lat: number,
+  lng: number,
+  year: number,
+): Promise<IndexChange | null> {
+  const current = await getSpectralIndices(env, db, lat, lng, year);
+  if (!current) return null;
+  const previous = await getSpectralIndices(env, db, lat, lng, year - 1);
+
+  let ndreChangePct: number | null = null;
+  if (previous?.ndre != null && current.ndre != null && Math.abs(previous.ndre) > 0.02) {
+    ndreChangePct = Number((((current.ndre - previous.ndre) / Math.abs(previous.ndre)) * 100).toFixed(1));
+  }
+
+  return { current, previous, ndreChangePct, year, previousYear: year - 1 };
+}

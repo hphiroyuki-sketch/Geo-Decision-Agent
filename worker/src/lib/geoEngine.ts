@@ -10,6 +10,10 @@
 // surface. Swapping this module for a real Earth Engine client is the
 // intended upgrade path; nothing above this layer needs to change.
 
+// Bump when the scoring formula, thresholds or mitigation rules change: an
+// analysis re-run under a different engine version is not the same analysis.
+export const ENGINE_VERSION = "3.0.1";
+
 export interface CandidateInput {
   name: string;
   lat?: number;
@@ -28,6 +32,12 @@ export interface RealDataOverride {
   fieldSpeciesNames?: string[];
   /** Metres from this candidate to the nearest confirmed record behind the reference embedding. */
   referenceDistanceM?: number;
+  /** Measured Sentinel-2 NDRE change against the previous year (FR-022). */
+  ndreChangePct?: number;
+  /** The two years the NDRE change was measured between. */
+  ndreYears?: [number, number];
+  /** This year's measured indices, for the expert view. */
+  indices?: { ndvi: number | null; ndre: number | null; ndmi: number | null; nbr: number | null };
 }
 
 export interface MitigationMeasure {
@@ -47,6 +57,9 @@ export interface CandidateResult {
   protectedAreaDistanceKm: number;
   connectivityImpact: "高" | "中" | "低";
   ndreChangePct: number;
+  /** True when ndreChangePct came from Sentinel-2 rather than the simulator. */
+  ndreMeasured: boolean;
+  indices?: { ndvi: number | null; ndre: number | null; ndmi: number | null; nbr: number | null };
   alphaEarthSimilarity: number;
   accessDistanceKm: number;
   accessRating: string;
@@ -106,7 +119,9 @@ export function analyzeCandidates(
     const habitatOverlap = clamp(rng() * 0.9 + rng() * 0.1, 0, 1);
     const protectedAreaDistanceKm = clamp(rng() * 6, 0.1, 6);
     const connectivityRaw = rng();
-    const ndreChangePct = -1 * clamp(rng() * 18, 0, 18); // negative = vegetation stress
+    const simulatedNdreChangePct = -1 * clamp(rng() * 18, 0, 18); // negative = vegetation stress
+    const ndreMeasured = override.ndreChangePct !== undefined;
+    const ndreChangePct = override.ndreChangePct ?? simulatedNdreChangePct;
     const simulatedAlphaEarthSimilarity = clamp(0.5 + rng() * 0.5, 0, 1);
     const alphaEarthSimilarity = override.alphaEarthSimilarity ?? simulatedAlphaEarthSimilarity;
     const accessDistanceKm = clamp(rng() * 5, 0.2, 5);
@@ -123,17 +138,34 @@ export function analyzeCandidates(
     const score = Math.round(clamp(100 - riskScore, 5, 97));
 
     const evidenceBasis = [override.alphaEarthSimilarity !== undefined ? "Earth Engine実データ" : "衛星推定"];
+    // A measured index change is the one axis that needs no field visit to be
+    // real, so it is named with the years it spans rather than folded into the
+    // generic "real data" label.
+    if (ndreMeasured) {
+      const years = override.ndreYears ? `${override.ndreYears[0]}→${override.ndreYears[1]}` : "前年比";
+      evidenceBasis.push(`NDRE実測（Sentinel-2 ${years}）`);
+    }
     // Only a reviewer-confirmed record earns "confirmed". Counting unreviewed
     // records as confirmed overstated the evidence in a document meant to
     // support a real siting decision.
     const confirmedCount = override.confirmedFieldRecordsCount ?? fieldRecordsCount;
     const unconfirmedCount = Math.max(0, fieldRecordsCount - confirmedCount);
+    // Section 9.2 defines the three levels by what is actually behind the
+    // number, not by how sure the model sounds: 高 needs verified field data,
+    // 中 needs several sources agreeing but no field confirmation, 低 is a
+    // single source or a gap. Counting sources here keeps that rule in code.
+    const measuredSources =
+      (override.alphaEarthSimilarity !== undefined ? 1 : 0) + (ndreMeasured ? 1 : 0);
     let confidence: "高" | "中" | "低" = "低";
-    if (confirmedCount >= 3) {
+    if (confirmedCount >= 3 && measuredSources >= 1) {
       evidenceBasis.push("現地確認済み");
       confidence = "高";
     } else if (confirmedCount >= 1) {
       evidenceBasis.push("現地確認済み");
+      confidence = "中";
+    } else if (measuredSources >= 2) {
+      // Two independent satellite measurements agreeing, but nobody has stood
+      // there - "中" with the field visit still named as what is missing.
       confidence = "中";
     }
     if (unconfirmedCount > 0) {
@@ -197,6 +229,8 @@ export function analyzeCandidates(
       protectedAreaDistanceKm: Number(protectedAreaDistanceKm.toFixed(1)),
       connectivityImpact: connectivityLabel(connectivityRaw),
       ndreChangePct: Number(ndreChangePct.toFixed(1)),
+      ndreMeasured,
+      indices: override.indices,
       alphaEarthSimilarity: Number(alphaEarthSimilarity.toFixed(2)),
       accessDistanceKm: Number(accessDistanceKm.toFixed(1)),
       accessRating: accessRating(accessDistanceKm),

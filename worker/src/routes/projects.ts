@@ -94,7 +94,32 @@ projectRoutes.get("/:id/candidates", async (c) => {
     mitigations = res.results;
   }
 
-  return c.json({ candidates, mitigations });
+  // The snapshot behind the newest candidates (output block 8 / FR-007), so the
+  // screen can say which model, which satellite year and which rule version
+  // produced these numbers instead of presenting them as timeless.
+  const analysisId = (candidates as { analysis_id: string | null }[])[0]?.analysis_id ?? null;
+  const analysis = analysisId
+    ? await c.env.DB.prepare(
+        `SELECT a.*, u.name AS run_by_name FROM analyses a
+         LEFT JOIN users u ON u.id = a.run_by WHERE a.id = ?`,
+      )
+        .bind(analysisId)
+        .first()
+    : null;
+
+  return c.json({ candidates, mitigations, analysis });
+});
+
+/** Every recorded run for this project, newest first (FR-037 判断履歴). */
+projectRoutes.get("/:id/analyses", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT a.*, u.name AS run_by_name FROM analyses a
+     LEFT JOIN users u ON u.id = a.run_by
+     WHERE a.project_id = ? ORDER BY a.executed_at DESC LIMIT 20`,
+  )
+    .bind(c.req.param("id"))
+    .all();
+  return c.json({ analyses: results });
 });
 
 projectRoutes.post("/:id/conversations", async (c) => {

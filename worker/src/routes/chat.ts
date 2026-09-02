@@ -4,14 +4,22 @@ import type { Env, AuthUser } from "../types";
 import { newId } from "../lib/crypto";
 import { getSetting, currentMonthKey } from "../lib/db";
 import { estimateCostUsd, getBudgetStatus } from "../lib/pricing";
-import { makeClient, buildSystemPrompt, ANALYZE_TOOL } from "../lib/anthropicClient";
-import { analyzeCandidates, type CandidateInput, type RealDataOverride } from "../lib/geoEngine";
+import {
+  makeClient,
+  buildSystemPrompt,
+  ANALYZE_TOOL,
+  PROMPT_VERSION,
+  EMBEDDING_DATASET,
+  INDICES_DATASET,
+} from "../lib/anthropicClient";
+import { analyzeCandidates, ENGINE_VERSION, type CandidateInput, type RealDataOverride } from "../lib/geoEngine";
 import { buildMeshContext } from "../lib/mesh";
 import {
   getEmbeddingVector,
   getReferenceEmbedding,
   findNearbyFieldRecords,
   distanceToNearestReferencePointM,
+  getIndexChange,
   cosineSimilarity,
 } from "../lib/fieldData";
 
@@ -157,9 +165,11 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
               });
 
               const overrides: Record<string, RealDataOverride> = {};
+              let referencePointCount = 0;
               if (conversation.project_id) {
                 const year = Number(await getSetting(c.env.DB, "earth_engine_year", "2024"));
                 const referenceEmbedding = await getReferenceEmbedding(c.env, c.env.DB, conversation.project_id, year);
+                referencePointCount = referenceEmbedding?.points.length ?? 0;
 
                 for (const cand of input.candidates ?? []) {
                   const override: RealDataOverride = {};
@@ -170,6 +180,18 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                     override.confirmedFieldRecordsCount = nearby.filter((n) => n.review_status === "confirmed").length;
                     const species = nearby.map((n) => n.species_guess).filter((s): s is string => !!s);
                     if (species.length) override.fieldSpeciesNames = [...new Set(species)];
+
+                    // FR-022: the measured index change for this point. Two
+                    // cached Earth Engine calls, so a three-candidate analysis
+                    // stays well inside the 50-subrequest budget.
+                    const change = await getIndexChange(c.env, c.env.DB, cand.lat, cand.lng, year);
+                    if (change) {
+                      override.indices = change.current;
+                      if (change.ndreChangePct !== null) {
+                        override.ndreChangePct = change.ndreChangePct;
+                        override.ndreYears = [change.previousYear, change.year];
+                      }
+                    }
 
                     if (referenceEmbedding) {
                       const candVector = await getEmbeddingVector(c.env, c.env.DB, cand.lat, cand.lng, year);
@@ -194,11 +216,42 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
 
               if (conversation.project_id) {
                 const analysisId = newId("an");
+                const year = Number(await getSetting(c.env.DB, "earth_engine_year", "2024"));
+
+                // FR-007 / NFR-010: the snapshot. Everything that could move the
+                // numbers between two runs is written down here, so "re-run this
+                // analysis" is replaying a record rather than trusting scroll-back.
+                await c.env.DB.prepare(
+                  `INSERT INTO analyses (id, project_id, conversation_id, run_by, purpose, inputs_json, candidate_count,
+                     model, prompt_version, engine_version, earth_engine_year, embedding_dataset, indices_dataset,
+                     earth_engine_available, reference_points, executed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                )
+                  .bind(
+                    analysisId,
+                    conversation.project_id,
+                    conversationId,
+                    user.id,
+                    input.purpose ?? null,
+                    JSON.stringify(input.candidates ?? []),
+                    results.length,
+                    claudeModel,
+                    PROMPT_VERSION,
+                    ENGINE_VERSION,
+                    year,
+                    EMBEDDING_DATASET,
+                    INDICES_DATASET,
+                    eeConfigured ? 1 : 0,
+                    referencePointCount,
+                    new Date().toISOString(),
+                  )
+                  .run();
+
                 for (const r of results) {
                   const candidateId = newId("cand");
                   await c.env.DB.prepare(
-                    `INSERT INTO site_candidates (id, project_id, label, lat, lng, rank, score, habitat_overlap, protected_area_distance_km, connectivity_impact, ndre_change_pct, alphaearth_similarity, access_distance_km, access_rating, confidence, evidence_basis, field_records_count, recommended_action, analysis_id, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO site_candidates (id, project_id, label, lat, lng, rank, score, habitat_overlap, protected_area_distance_km, connectivity_impact, ndre_change_pct, alphaearth_similarity, access_distance_km, access_rating, confidence, evidence_basis, field_records_count, recommended_action, analysis_id, created_at, ndre_measured, ndvi, ndre, ndmi, nbr)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                   )
                     .bind(
                       candidateId,
@@ -221,6 +274,11 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                       r.recommendedAction,
                       analysisId,
                       new Date().toISOString(),
+                      r.ndreMeasured ? 1 : 0,
+                      r.indices?.ndvi ?? null,
+                      r.indices?.ndre ?? null,
+                      r.indices?.ndmi ?? null,
+                      r.indices?.nbr ?? null,
                     )
                     .run();
                   for (const m of r.mitigations) {

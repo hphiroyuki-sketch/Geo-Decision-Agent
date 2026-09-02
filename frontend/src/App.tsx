@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { RefreshCw, WifiOff } from "lucide-react";
 import { useAuth } from "./lib/auth";
+import { registerServiceWorker, applyUpdate } from "./lib/pwa";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -31,8 +34,54 @@ function ProtectedLayout() {
   return <Layout />;
 }
 
+/**
+ * The two states a PWA has to tell the user about itself: a new build is ready,
+ * and the network is gone. Both are one line at the top of the screen rather
+ * than a modal, because neither blocks what the user is currently doing.
+ */
+function ConnectionBanners() {
+  const [updateReady, setUpdateReady] = useState(false);
+  const [offline, setOffline] = useState(() => typeof navigator !== "undefined" && !navigator.onLine);
+
+  useEffect(() => {
+    registerServiceWorker(() => setUpdateReady(true));
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  if (!updateReady && !offline) return null;
+
+  return (
+    <div className="fixed top-0 inset-x-0 z-[60] flex flex-col items-center gap-1 p-2 pointer-events-none">
+      {offline && (
+        <div className="pointer-events-auto flex items-center gap-2 bg-slate-800 text-white text-[11px] rounded-full px-3 py-1.5 shadow-lg">
+          <WifiOff size={12} />
+          オフラインです。保存済みの画面は開けますが、新しい分析は通信が戻ってから実行されます。
+        </div>
+      )}
+      {updateReady && (
+        <button
+          onClick={applyUpdate}
+          className="pointer-events-auto flex items-center gap-2 bg-[var(--gda-green)] text-white text-[11px] font-medium rounded-full px-3 py-1.5 shadow-lg"
+        >
+          <RefreshCw size={12} />
+          新しいバージョンがあります。タップして更新
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   return (
+    <>
+    <ConnectionBanners />
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
@@ -55,5 +104,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

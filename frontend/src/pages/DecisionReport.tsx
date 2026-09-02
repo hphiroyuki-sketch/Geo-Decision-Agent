@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Download, Link2, CheckCircle2, Clock } from "lucide-react";
+import { Download, Link2, CheckCircle2, Clock, History } from "lucide-react";
 import { api } from "../lib/api";
+import { useDisplayMode } from "../lib/displayMode";
+import ReproductionInfo, { type AnalysisSnapshot } from "../components/ReproductionInfo";
 
 interface Report {
   id: string;
@@ -38,6 +40,8 @@ export default function DecisionReport() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [history, setHistory] = useState<AnalysisSnapshot[]>([]);
+  const { mode, atLeast } = useDisplayMode();
 
   const load = async () => {
     if (!id) return;
@@ -46,6 +50,10 @@ export default function DecisionReport() {
     setReviewers(r.reviewers);
     const c = await api.get<{ candidates: Candidate[] }>(`/projects/${id}/candidates`);
     setCandidates(c.candidates);
+    // FR-037 判断履歴: every recorded run, so a reviewer can see what changed
+    // between two versions of this report rather than only its latest state.
+    const h = await api.get<{ analyses: AnalysisSnapshot[] }>(`/projects/${id}/analyses`);
+    setHistory(h.analyses);
   };
 
   useEffect(() => {
@@ -96,7 +104,16 @@ export default function DecisionReport() {
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto print:p-0">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 print:hidden">
-        <h1 className="text-lg font-semibold text-slate-800">意思決定レポート</h1>
+        <div>
+          <h1 className="text-lg font-semibold text-slate-800">意思決定レポート</h1>
+          <p className="text-[11px] text-slate-400">
+            {mode === "easy"
+              ? "かんたん表示：結論と推奨アクションのみ"
+              : mode === "business"
+                ? "ビジネス表示：役員・決裁者向け。結論・根拠の状態・承認状況"
+                : "エキスパート表示：技術者・監査向け。判断履歴と再現情報を含む"}
+          </p>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -138,7 +155,7 @@ export default function DecisionReport() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 ${atLeast("business") ? "" : "hidden"}`}>
           <div className="text-xs font-medium text-slate-500 mb-3">根拠の状態</div>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
@@ -156,7 +173,11 @@ export default function DecisionReport() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:col-span-2">
+        <div
+          className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 ${
+            atLeast("business") ? "sm:col-span-2" : "sm:col-span-3"
+          }`}
+        >
           <div className="text-xs font-medium text-slate-500 mb-3">推奨アクション</div>
           <div className="space-y-2">
             {candidates.slice(0, 3).map((c) => (
@@ -193,9 +214,40 @@ export default function DecisionReport() {
           ))}
         </div>
         <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
-          このレポートにはAIによる推定が含まれます。データ: シミュレーション衛星データ / 現地記録
+          このレポートにはAIによる推定が含まれます。根拠の内訳と、どの値が実測でどの値が推定かは分析結果画面に表示されます。
         </div>
       </div>
+
+      {atLeast("expert") && history.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mt-4">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-3">
+            <History size={13} /> 判断履歴 / 監査トレイル
+          </div>
+          <ol className="space-y-2">
+            {history.map((h) => (
+              <li key={h.id} className="flex items-start gap-2.5 text-[11px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--gda-green)] mt-1.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-slate-700">
+                    {new Date(h.executed_at).toLocaleString("ja-JP")} ／ {h.run_by_name ?? "—"} が
+                    {h.candidate_count}地点を分析
+                  </div>
+                  <div className="text-slate-400 font-mono text-[10px] break-all">
+                    {h.id} ・ 判定ロジック {h.engine_version} ・ 衛星 {h.earth_engine_year ?? "—"}年 ・
+                    {h.earth_engine_available ? "実データ" : "シミュレーション"}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {atLeast("expert") && history[0] && (
+        <div className="mt-4">
+          <ReproductionInfo snapshot={history[0]} />
+        </div>
+      )}
     </div>
   );
 }

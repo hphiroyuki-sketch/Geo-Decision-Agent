@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type AuthUser } from "./api";
+import { clearDeviceData } from "./pwa";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -37,6 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await api.post("/auth/logout");
+    // NFR-015: signing out clears what this device kept - cached shell,
+    // display-mode preference, anything else stored under this origin.
+    await clearDeviceData();
     setUser(null);
   }, []);
 

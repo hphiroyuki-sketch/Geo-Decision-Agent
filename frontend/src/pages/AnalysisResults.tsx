@@ -5,6 +5,8 @@ import { BarChart3, ThumbsUp, TriangleAlert, HelpCircle } from "lucide-react";
 import { api } from "../lib/api";
 import MapView from "../components/MapView";
 import { Term, Hint, EmptyState, Verdict } from "../components/Explain";
+import { useDisplayMode } from "../lib/displayMode";
+import ReproductionInfo, { type AnalysisSnapshot } from "../components/ReproductionInfo";
 
 interface Candidate {
   id: string;
@@ -24,6 +26,12 @@ interface Candidate {
   evidence_basis: string;
   field_records_count: number;
   recommended_action: string;
+  /** 1 when ndre_change_pct is a Sentinel-2 measurement, 0 when simulated. */
+  ndre_measured: number;
+  ndvi: number | null;
+  ndre: number | null;
+  ndmi: number | null;
+  nbr: number | null;
 }
 
 interface Mitigation {
@@ -94,14 +102,21 @@ export default function AnalysisResults() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [mitigations, setMitigations] = useState<Mitigation[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<AnalysisSnapshot | null>(null);
+  const { mode, atLeast } = useDisplayMode();
   const [projectCenter, setProjectCenter] = useState<[number, number]>([36.2048, 138.2529]);
 
   useEffect(() => {
     if (!id) return;
-    api.get<{ candidates: Candidate[]; mitigations: Mitigation[] }>(`/projects/${id}/candidates`).then((r) => {
-      setCandidates(r.candidates);
-      setMitigations(r.mitigations);
-    });
+    api
+      .get<{ candidates: Candidate[]; mitigations: Mitigation[]; analysis: AnalysisSnapshot | null }>(
+        `/projects/${id}/candidates`,
+      )
+      .then((r) => {
+        setCandidates(r.candidates);
+        setMitigations(r.mitigations);
+        setSnapshot(r.analysis);
+      });
     api.get<{ project: { center_lat: number; center_lng: number } }>(`/projects/${id}`).then((r) =>
       setProjectCenter([r.project.center_lat, r.project.center_lng]),
     );
@@ -113,6 +128,14 @@ export default function AnalysisResults() {
         <div>
           <div className="text-xs text-slate-400">分析結果</div>
           <h1 className="text-lg font-semibold text-slate-800">生物多様性ポテンシャル評価</h1>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {mode === "easy"
+              ? "かんたん表示：結論と次にすることだけを表示しています。"
+              : mode === "business"
+                ? "ビジネス表示：優先順位・回避策・判断に必要な数値を表示しています。"
+                : "エキスパート表示：実測指標・算出条件・再現情報まで表示しています。"}
+            左のメニューから表示モードを切り替えられます。
+          </p>
         </div>
       </div>
 
@@ -156,6 +179,16 @@ export default function AnalysisResults() {
                 </Verdict>
                 <Verdict level="watch">最終判断には現地確認が必要</Verdict>
               </div>
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <div className="text-[11px] text-slate-400 mb-1">次にすること</div>
+                <ol className="text-sm text-slate-700 space-y-1 list-decimal list-inside leading-relaxed">
+                  <li>
+                    {candidates[0].label} を現地で確認する（下のカードの「ミティゲーション案」に、まず何をずらせば影響が減るかが出ています）。
+                  </li>
+                  <li>影響が残る場合は、回避 → 低減 → 回復 → オフセットの順で対策を検討する。</li>
+                  <li>法令適合性・環境アセスメントの要否は、所管行政庁と専門家に確認する。</li>
+                </ol>
+              </div>
             </div>
           )}
 
@@ -180,13 +213,22 @@ export default function AnalysisResults() {
                   <div className="text-xl font-bold">{c.score}</div>
                 </div>
                 <div className="text-[11px] mb-2">推奨: {c.recommended_action}</div>
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {c.evidence_basis.split(",").map((e) => (
-                    <span key={e} className="text-[10px] bg-white/70 border border-current rounded-full px-2 py-0.5">
-                      {e}
-                    </span>
-                  ))}
-                </div>
+                {atLeast("business") && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {c.evidence_basis.split(",").map((e) => (
+                      <span key={e} className="text-[10px] bg-white/70 border border-current rounded-full px-2 py-0.5">
+                        {e}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {atLeast("expert") && (c.ndvi != null || c.ndre != null) && (
+                  <div className="mb-2 bg-white/60 rounded-lg p-2 text-[10px] font-mono text-slate-600 space-y-0.5">
+                    <div className="font-sans font-medium text-slate-500">Sentinel-2 実測値（年次中央値合成）</div>
+                    <div>NDVI {c.ndvi?.toFixed(3) ?? "—"} ／ NDRE {c.ndre?.toFixed(3) ?? "—"}</div>
+                    <div>NDMI {c.ndmi?.toFixed(3) ?? "—"} ／ NBR {c.nbr?.toFixed(3) ?? "—"}</div>
+                  </div>
+                )}
                 {(() => {
                   const reading = readCandidate(c);
                   return (
@@ -236,6 +278,7 @@ export default function AnalysisResults() {
             ))}
           </div>
 
+          {atLeast("business") && (
           <div className="col-span-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -258,7 +301,18 @@ export default function AnalysisResults() {
                     <td className="px-4 py-3 font-medium text-slate-700">
                       {c.rank}. {c.label}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{c.ndre_change_pct}%</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {c.ndre_change_pct}%
+                      <span
+                        className={`ml-1.5 text-[10px] rounded px-1 py-0.5 border ${
+                          c.ndre_measured
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-slate-50 text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        {c.ndre_measured ? "実測" : "推定"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-600">{c.alphaearth_similarity}</td>
                     <td className="px-4 py-3 text-slate-600">
                       {c.access_distance_km}km（{c.access_rating}）
@@ -272,13 +326,22 @@ export default function AnalysisResults() {
             <div className="px-4 py-3 border-t border-slate-50">
               <Hint tone="warn">
                 <strong>この表の読み方。</strong>
-                「類似度」だけは条件が揃えば衛星の実測値ですが、生息地重複度・保護区域距離・アクセスは本MVPでは
-                シミュレーション値です。各候補の
+                「環境変化(NDRE)」に<span className="mx-0.5 font-semibold">実測</span>と付いた行は Sentinel-2
+                の前年比の実測値、<span className="mx-0.5 font-semibold">推定</span>
+                と付いた行は衛星データが取得できずシミュレーション値に落ちた行です。「類似度」も条件が揃えば実測値です。
+                一方で生息地重複度・保護区域距離・アクセスは本MVPではシミュレーション値のままです。各候補の
                 <Term id="evidence">根拠ステータス</Term>
                 を必ず確認し、法令適合性・アセスメントの要否は所管行政庁と専門家に確認してください。
               </Hint>
             </div>
           </div>
+          )}
+
+          {atLeast("expert") && snapshot && (
+            <div className="col-span-full">
+              <ReproductionInfo snapshot={snapshot} />
+            </div>
+          )}
         </div>
       )}
     </div>
