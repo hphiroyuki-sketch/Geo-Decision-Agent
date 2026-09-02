@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { BarChart3, FileText, Satellite, MessageSquare, Map as MapIcon, Camera, Grid3x3 } from "lucide-react";
 import { api, streamChat } from "../lib/api";
 import MapView, { type MapMarker } from "../components/MapView";
+import MapControlPanel, { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
 import ChatInput from "../components/ChatInput";
 
 interface ProjectDetail {
@@ -50,6 +51,10 @@ export default function ProjectChat() {
   const [stepLabel, setStepLabel] = useState<string | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"chat" | "map">("chat");
+  const [controls, setControls] = useState<MapControlState>(DEFAULT_MAP_CONTROLS);
+  // The mesh belongs on the map people actually look at, not only on the
+  // screen dedicated to producing it.
+  const [meshGeoJson, setMeshGeoJson] = useState<GeoJSON.FeatureCollection | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +76,16 @@ export default function ProjectChat() {
         `/projects/${id}/field-records`,
       );
       setFieldRecords(field.records);
+
+      try {
+        const list = await api.get<{ meshes: { id: string }[] }>(`/projects/${id}/meshes`);
+        if (list.meshes[0]) {
+          const detail = await api.get<{ geojson: GeoJSON.FeatureCollection }>(`/meshes/${list.meshes[0].id}`);
+          setMeshGeoJson(detail.geojson);
+        }
+      } catch {
+        // A project with no mesh yet is the normal case, not an error.
+      }
     })();
   }, [id]);
 
@@ -251,8 +266,27 @@ export default function ProjectChat() {
           center={project ? [project.center_lat, project.center_lng] : [36.2048, 138.2529]}
           zoom={project ? 13 : 5}
           markers={markers}
-          basemap="satellite"
+          basemap={controls.basemap}
+          imageryEpoch={controls.imageryEpoch}
+          imageryOpacity={controls.imageryOpacity}
+          mesh={meshGeoJson}
+          meshVisible={controls.meshVisible}
+          meshOpacity={controls.meshOpacity}
+          meshColorMode={controls.meshColorMode}
+          gridVisible={controls.gridVisible}
+          labelsVisible={controls.labelsVisible}
+          terrain3d={controls.terrain3d}
+          terrainExaggeration={controls.exaggeration}
         />
+
+        <div className="absolute top-3 right-3 z-10 w-56 max-h-[calc(100%-1.5rem)] overflow-y-auto">
+          <MapControlPanel
+            value={controls}
+            onChange={setControls}
+            hasMesh={Boolean(meshGeoJson && meshGeoJson.features.length > 0)}
+            defaultOpen={false}
+          />
+        </div>
       </div>
     </div>
   );

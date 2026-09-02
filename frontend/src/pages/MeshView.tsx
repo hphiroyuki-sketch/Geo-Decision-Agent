@@ -1,27 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  Layers,
   Play,
   Loader2,
-  Satellite,
   Grid3x3,
   Sprout,
   TriangleAlert,
   ShieldCheck,
   Crosshair,
   MapPin,
-  Box,
-  Mountain,
+  SlidersHorizontal,
+  Map as MapIcon,
 } from "lucide-react";
 import { api } from "../lib/api";
-import MapView, {
-  type Basemap,
-  type CellProperties,
-  type MapMarker,
-  type MeshColorMode,
-  type MeshHeightMode,
-} from "../components/MapView";
+import MapView, { type CellProperties, type MapMarker } from "../components/MapView";
+import MapControlPanel, { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
 import { Term, Hint, EmptyState } from "../components/Explain";
 
 interface MeshRow {
@@ -124,15 +117,9 @@ export default function MeshView() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [basemap, setBasemap] = useState<Basemap>("satellite");
-  const [meshVisible, setMeshVisible] = useState(true);
-  const [gridVisible, setGridVisible] = useState(true);
-  const [labelsVisible, setLabelsVisible] = useState(true);
-  const [opacity, setOpacity] = useState(0.6);
-  const [colorMode, setColorMode] = useState<MeshColorMode>("class");
-  const [terrain3d, setTerrain3d] = useState(false);
-  const [heightMode, setHeightMode] = useState<MeshHeightMode>("flat");
-  const [exaggeration, setExaggeration] = useState(1.5);
+  const [controls, setControls] = useState<MapControlState>(DEFAULT_MAP_CONTROLS);
+  // Mobile has no room for a settings column beside a map, so they take turns.
+  const [mobileView, setMobileView] = useState<"settings" | "map">("settings");
   const [selected, setSelected] = useState<CellProperties | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   // Distinguishes "no analysis" from "analysis exists but the map could not
@@ -218,6 +205,7 @@ export default function MeshView() {
     await api.post(`/meshes/${meshId}/analyze`, {});
     await loadDetail(meshId);
     setProgress(null);
+    setMobileView("map");
   };
 
   const createMesh = async () => {
@@ -294,7 +282,32 @@ export default function MeshView() {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem-4rem)] md:h-screen">
-      <div className="lg:w-[400px] lg:shrink-0 border-r border-slate-200 bg-white overflow-y-auto">
+      <div className="lg:hidden flex border-b border-slate-200 bg-white shrink-0">
+        <button
+          onClick={() => setMobileView("settings")}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
+            mobileView === "settings"
+              ? "border-[var(--gda-green)] text-[var(--gda-green)]"
+              : "border-transparent text-slate-400"
+          }`}
+        >
+          <SlidersHorizontal size={14} /> 設定・結果
+        </button>
+        <button
+          onClick={() => setMobileView("map")}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
+            mobileView === "map"
+              ? "border-[var(--gda-green)] text-[var(--gda-green)]"
+              : "border-transparent text-slate-400"
+          }`}
+        >
+          <MapIcon size={14} /> 地図
+        </button>
+      </div>
+
+      <div
+        className={`${mobileView === "settings" ? "block" : "hidden"} lg:block lg:w-[400px] lg:shrink-0 border-r border-slate-200 bg-white overflow-y-auto flex-1 lg:flex-none`}
+      >
         <div className="px-4 py-3 border-b border-slate-100">
           <div className="text-xs text-slate-400">FR-020 / FR-026</div>
           <h1 className="font-semibold text-slate-800 text-sm">10mメッシュ解析</h1>
@@ -661,7 +674,7 @@ export default function MeshView() {
         )}
       </div>
 
-      <div className="relative flex-1 min-h-0">
+      <div className={`${mobileView === "map" ? "block" : "hidden"} lg:block relative flex-1 min-h-0`}>
         <MapView
           center={
             detail
@@ -671,19 +684,21 @@ export default function MeshView() {
                 : [36.2048, 138.2529]
           }
           zoom={detail || plannedCenter ? 17 : 5}
-          basemap={basemap}
+          basemap={controls.basemap}
+          imageryEpoch={controls.imageryEpoch}
+          imageryOpacity={controls.imageryOpacity}
           mesh={detail?.geojson ?? null}
-          meshVisible={meshVisible}
-          meshOpacity={opacity}
-          meshColorMode={colorMode}
-          gridVisible={gridVisible}
-          labelsVisible={labelsVisible}
+          meshVisible={controls.meshVisible}
+          meshOpacity={controls.meshOpacity}
+          meshColorMode={controls.meshColorMode}
+          meshHeightMode={controls.meshHeightMode}
+          gridVisible={controls.gridVisible}
+          labelsVisible={controls.labelsVisible}
+          terrain3d={controls.terrain3d}
+          terrainExaggeration={controls.exaggeration}
           markers={markers}
           fitBounds={bounds}
           maxFitZoom={18}
-          terrain3d={terrain3d}
-          terrainExaggeration={exaggeration}
-          meshHeightMode={heightMode}
           onCellClick={setSelected}
           onOverlayStatus={setOverlayOk}
           onMapClick={
@@ -703,168 +718,13 @@ export default function MeshView() {
           </div>
         )}
 
-        <div className="absolute top-3 left-3 z-10 w-60">
-          <div className="bg-white/95 backdrop-blur rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <button
-              onClick={() => setPanelOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-700"
-            >
-              <span className="flex items-center gap-1.5">
-                <Layers size={13} /> 表示
-              </span>
-              <span className="text-slate-400">{panelOpen ? "−" : "+"}</span>
-            </button>
-            {panelOpen && (
-              <div className="px-3 pb-3 space-y-2.5">
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setBasemap("satellite")}
-                    className={`flex-1 flex items-center justify-center gap-1 text-[11px] py-1.5 rounded-lg border ${
-                      basemap === "satellite"
-                        ? "bg-slate-900 text-white border-slate-900"
-                        : "bg-white text-slate-600 border-slate-200"
-                    }`}
-                  >
-                    <Satellite size={11} /> 航空写真
-                  </button>
-                  <button
-                    onClick={() => setBasemap("streets")}
-                    className={`flex-1 text-[11px] py-1.5 rounded-lg border ${
-                      basemap === "streets"
-                        ? "bg-slate-900 text-white border-slate-900"
-                        : "bg-white text-slate-600 border-slate-200"
-                    }`}
-                  >
-                    地図
-                  </button>
-                </div>
-
-                <div className="border-t border-slate-100 pt-2.5">
-                  <label className="flex items-center justify-between text-[11px] font-medium text-slate-700">
-                    <span className="flex items-center gap-1.5">
-                      <Mountain size={12} /> 3D地形表示
-                    </span>
-                    <input type="checkbox" checked={terrain3d} onChange={(e) => setTerrain3d(e.target.checked)} />
-                  </label>
-                  {terrain3d && (
-                    <div className="mt-1.5">
-                      <div className="flex justify-between text-[10px] text-slate-400">
-                        <span>起伏の強調</span>
-                        <span>×{exaggeration.toFixed(1)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={1}
-                        max={3}
-                        step={0.1}
-                        value={exaggeration}
-                        onChange={(e) => setExaggeration(Number(e.target.value))}
-                        className="w-full accent-[var(--gda-green)]"
-                      />
-                      <p className="text-[10px] text-slate-400 leading-snug">
-                        右ドラッグ（またはCtrl+ドラッグ）で視点を傾け・回転できます。標高データは約30m解像度のため、
-                        尾根・谷の把握には十分ですが、10mマス1つ分の起伏までは再現されません。
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
-                    <Box size={11} /> マスの高さ
-                  </div>
-                  <div className="grid grid-cols-3 gap-1">
-                    {(
-                      [
-                        ["flat", "平面"],
-                        ["similarity", "類似度"],
-                        ["change", "変化"],
-                      ] as [MeshHeightMode, string][]
-                    ).map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        onClick={() => {
-                          setHeightMode(mode);
-                          if (mode !== "flat") setTerrain3d(true);
-                        }}
-                        className={`text-[11px] py-1 rounded-lg border ${
-                          heightMode === mode
-                            ? "bg-slate-900 text-white border-slate-900"
-                            : "bg-white text-slate-600 border-slate-200"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {heightMode !== "flat" && (
-                    <p className="text-[10px] text-slate-400 mt-1 leading-snug">
-                      柱の高さ＝{heightMode === "similarity" ? "類似度（高いほど確認済み生息地に近い）" : "変化スコア（高いほど前年から変化）"}
-                      。高さは表示用に強調しており、実際の標高ではありません。
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <div className="text-[11px] text-slate-500 mb-1">マスの色分け</div>
-                  <div className="grid grid-cols-3 gap-1">
-                    {(
-                      [
-                        ["class", "判定"],
-                        ["similarity", "類似度"],
-                        ["change", "変化"],
-                      ] as [MeshColorMode, string][]
-                    ).map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        onClick={() => setColorMode(mode)}
-                        className={`text-[11px] py-1 rounded-lg border ${
-                          colorMode === mode
-                            ? "bg-[var(--gda-green)] text-white border-[var(--gda-green)]"
-                            : "bg-white text-slate-600 border-slate-200"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <label className="flex items-center justify-between text-[11px] text-slate-600">
-                  <span className="flex items-center gap-1.5">
-                    <Grid3x3 size={12} /> メッシュ
-                  </span>
-                  <input type="checkbox" checked={meshVisible} onChange={(e) => setMeshVisible(e.target.checked)} />
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={opacity}
-                  onChange={(e) => setOpacity(Number(e.target.value))}
-                  className="w-full accent-[var(--gda-green)]"
-                />
-                <label className="flex items-center justify-between text-[11px] text-slate-600">
-                  <span>マスの境界線</span>
-                  <input type="checkbox" checked={gridVisible} onChange={(e) => setGridVisible(e.target.checked)} />
-                </label>
-                <label className="flex items-center justify-between text-[11px] text-slate-600">
-                  <span>地名ラベル</span>
-                  <input
-                    type="checkbox"
-                    checked={labelsVisible}
-                    onChange={(e) => setLabelsVisible(e.target.checked)}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
+        <div className="absolute top-3 left-3 z-10 w-60 max-h-[calc(100%-1.5rem)] overflow-y-auto">
+          <MapControlPanel value={controls} onChange={setControls} showMeshDetail hasMesh={Boolean(detail)} />
 
           {detail && (
             <div className="mt-2 bg-white/95 backdrop-blur rounded-xl shadow-sm border border-slate-200 p-3">
               <div className="text-xs font-semibold text-slate-700 mb-1.5">凡例</div>
-              {colorMode === "class" ? (
+              {controls.meshColorMode === "class" ? (
                 <div className="space-y-1">
                   {detail.legend.map((l) => (
                     <div key={l.key} className="flex items-center gap-2 text-[11px] text-slate-600">
@@ -873,7 +733,7 @@ export default function MeshView() {
                     </div>
                   ))}
                 </div>
-              ) : colorMode === "similarity" ? (
+              ) : controls.meshColorMode === "similarity" ? (
                 <div>
                   <div className="h-2.5 rounded" style={{ background: "linear-gradient(90deg,#f1f8f4,#96ccae,#2f9e63,#0f5132)" }} />
                   <div className="flex justify-between text-[10px] text-slate-500 mt-1">

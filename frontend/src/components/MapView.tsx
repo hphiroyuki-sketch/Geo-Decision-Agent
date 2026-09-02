@@ -43,6 +43,11 @@ interface MapViewProps {
   onMapClick?: (lat: number, lng: number) => void;
   fitBounds?: [[number, number], [number, number]] | null;
   maxFitZoom?: number;
+  /** Which aerial photography epoch to show; see IMAGERY_EPOCHS. */
+  imageryEpoch?: string;
+  /** 0-1. Below 1 the street map shows through, which is how a viewer compares
+   *  what is on the photo against what is mapped. */
+  imageryOpacity?: number;
   /** Real terrain relief, tilted view and sky - the Google Earth-like read. */
   terrain3d?: boolean;
   terrainExaggeration?: number;
@@ -52,26 +57,48 @@ interface MapViewProps {
   onOverlayStatus?: (ok: boolean) => void;
 }
 
-// Imagery: GSI (Geospatial Information Authority of Japan) seamless photo is
-// the sharpest keyless source over Japan and is the product's home ground, so
-// it sits on top; Esri World Imagery renders underneath it and shows through
-// anywhere GSI has no coverage. Esri alone returned "Map data not yet
-// available" placeholder tiles at mesh zoom levels.
+/**
+ * Imagery epochs. GSI publishes Japan's aerial photography back to the 1940s
+ * as plain XYZ tiles with no key, which is what makes "the forest used to be
+ * here" something a person can see rather than infer from a number. Coverage
+ * thins the further back you go - the older surveys were flown over cities and
+ * their surroundings - so each epoch carries a note saying so.
+ */
+export interface ImageryEpoch {
+  id: string;
+  label: string;
+  period: string;
+  /** Style layer ids to show for this epoch, bottom-most first. */
+  layers: string[];
+  note?: string;
+}
+
+export const IMAGERY_EPOCHS: ImageryEpoch[] = [
+  { id: "current", label: "最新", period: "現在", layers: ["esri", "gsi"] },
+  { id: "ort", label: "2007〜", period: "2007年〜", layers: ["ort"], note: "電子国土基本図オルソ（カラー）" },
+  { id: "gazo4", label: "1984-86", period: "1984〜1986年", layers: ["gazo4"], note: "整備範囲は限定的です" },
+  { id: "gazo3", label: "1979-83", period: "1979〜1983年", layers: ["gazo3"], note: "整備範囲は限定的です" },
+  { id: "gazo2", label: "1974-78", period: "1974〜1978年", layers: ["gazo2"], note: "整備範囲は限定的です" },
+  { id: "gazo1", label: "1961-69", period: "1961〜1969年", layers: ["gazo1"], note: "白黒。整備範囲は限定的です" },
+  { id: "usa", label: "1945-50", period: "1945〜1950年", layers: ["usa"], note: "米軍撮影の白黒写真。都市部中心" },
+];
+
+const GSI_ATTRIBUTION = '<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>';
+
+function gsiPhoto(path: string, maxzoom: number): maplibregl.RasterSourceSpecification {
+  return {
+    type: "raster",
+    tiles: [`https://cyberjapandata.gsi.go.jp/xyz/${path}/{z}/{x}/{y}.jpg`],
+    tileSize: 256,
+    maxzoom,
+    attribution: GSI_ATTRIBUTION,
+  };
+}
+
+// Esri World Imagery renders under the GSI photo so coverage outside Japan
+// still has something to show; Esri alone returned "Map data not yet
+// available" placeholders at mesh zoom levels.
 const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
-  esri: {
-    type: "raster",
-    tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-    tileSize: 256,
-    maxzoom: 18,
-    attribution: "Esri, Maxar, Earthstar Geographics",
-  },
-  gsi: {
-    type: "raster",
-    tiles: ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"],
-    tileSize: 256,
-    maxzoom: 18,
-    attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
-  },
   streets: {
     type: "raster",
     tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
@@ -79,6 +106,20 @@ const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
     maxzoom: 19,
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   },
+  esri: {
+    type: "raster",
+    tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    tileSize: 256,
+    maxzoom: 18,
+    attribution: "Esri, Maxar, Earthstar Geographics",
+  },
+  gsi: gsiPhoto("seamlessphoto", 18),
+  ort: gsiPhoto("ort", 18),
+  gazo4: gsiPhoto("gazo4", 17),
+  gazo3: gsiPhoto("gazo3", 17),
+  gazo2: gsiPhoto("gazo2", 17),
+  gazo1: gsiPhoto("gazo1", 17),
+  usa: gsiPhoto("ort_USA10", 17),
   labels: {
     type: "raster",
     tiles: [
@@ -90,13 +131,21 @@ const SOURCES: Record<string, maplibregl.RasterSourceSpecification> = {
   },
 };
 
+/** Every imagery layer, in draw order; the street map stays underneath them
+ *  all so lowering imagery opacity reveals it rather than a blank canvas. */
+const IMAGERY_LAYER_IDS = ["esri", "gsi", "ort", "gazo4", "gazo3", "gazo2", "gazo1", "usa"];
+
 const BASE_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: SOURCES,
   layers: [
-    { id: "streets", type: "raster", source: "streets", layout: { visibility: "none" } },
-    { id: "esri", type: "raster", source: "esri" },
-    { id: "gsi", type: "raster", source: "gsi" },
+    { id: "streets", type: "raster", source: "streets" },
+    ...IMAGERY_LAYER_IDS.map((id) => ({
+      id,
+      type: "raster" as const,
+      source: id,
+      layout: { visibility: "none" as const },
+    })),
     { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.85 } },
   ],
 };
@@ -313,6 +362,8 @@ export default function MapView({
   meshColorMode = "class",
   gridVisible = true,
   labelsVisible = true,
+  imageryEpoch = "current",
+  imageryOpacity = 1,
   onCellClick,
   onMapClick,
   fitBounds = null,
@@ -415,14 +466,26 @@ export default function MapView({
     if (!map) return;
     return whenStyleReady(map, () => {
       const imagery = basemap === "satellite";
-      map.setLayoutProperty("esri", "visibility", imagery ? "visible" : "none");
-      map.setLayoutProperty("gsi", "visibility", imagery ? "visible" : "none");
-      map.setLayoutProperty("streets", "visibility", imagery ? "none" : "visible");
+      const epoch = IMAGERY_EPOCHS.find((e) => e.id === imageryEpoch) ?? IMAGERY_EPOCHS[0];
+      const active = new Set(imagery ? epoch.layers : []);
+
+      for (const id of IMAGERY_LAYER_IDS) {
+        map.setLayoutProperty(id, "visibility", active.has(id) ? "visible" : "none");
+        if (active.has(id)) map.setPaintProperty(id, "raster-opacity", imageryOpacity);
+      }
+      // The street map stays under the photo rather than being swapped out, so
+      // fading the photo reveals roads and place names underneath it.
+      map.setLayoutProperty("streets", "visibility", "visible");
       // Imagery carries no place names of its own, so labels only earn their
-      // place over it.
-      map.setLayoutProperty("labels", "visibility", labelsVisible && imagery ? "visible" : "none");
+      // place over it - and only while the photo is opaque enough to hide the
+      // street map's own labels.
+      map.setLayoutProperty(
+        "labels",
+        "visibility",
+        labelsVisible && imagery && imageryOpacity > 0.6 ? "visible" : "none",
+      );
     });
-  }, [basemap, labelsVisible]);
+  }, [basemap, labelsVisible, imageryEpoch, imageryOpacity]);
 
   useEffect(() => {
     const map = mapRef.current;
