@@ -73,7 +73,7 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState<Kpi[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [items, setItems] = useState<ActionItem[]>([]);
-  const [basemap, setBasemap] = useState<Basemap>("streets");
+  const [basemap, setBasemap] = useState<Basemap>("satellite");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -171,7 +171,7 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="h-[320px]">
-            <MapView center={center} zoom={7} markers={markers} basemap={basemap} />
+            <MapView center={center} zoom={7} markers={markers} basemap={basemap} globe introFlight showUserLocation />
           </div>
         </div>
 

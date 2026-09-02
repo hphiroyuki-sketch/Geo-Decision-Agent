@@ -55,6 +55,14 @@ interface MapViewProps {
   /** Reports whether the overlay layers exist, so a caller can tell the user
    *  that a missing mesh is a display fault rather than missing analysis. */
   onOverlayStatus?: (ok: boolean) => void;
+  /** Renders the earth as a sphere rather than a flat sheet. */
+  globe?: boolean;
+  /** Opens on the globe and flies down to the target, the way an atlas hands
+   *  you the context before the detail. */
+  introFlight?: boolean;
+  /** Shows and follows the viewer's own position - the thing a surveyor needs
+   *  most while standing in the field. */
+  showUserLocation?: boolean;
 }
 
 /**
@@ -355,7 +363,7 @@ export default function MapView({
   zoom = 6,
   markers = [],
   className,
-  basemap = "streets",
+  basemap = "satellite",
   mesh = null,
   meshVisible = true,
   meshOpacity = 0.55,
@@ -372,11 +380,18 @@ export default function MapView({
   terrainExaggeration = 1.5,
   meshHeightMode = "flat",
   onOverlayStatus,
+  globe = true,
+  introFlight = false,
+  showUserLocation = false,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRefs = useRef<maplibregl.Marker[]>([]);
   const handlersBoundRef = useRef(false);
+  // The opening flight owns the camera until it lands; the ordinary centring
+  // effect must not yank the view out from under it.
+  const introActiveRef = useRef(false);
+  const introDoneRef = useRef(false);
   const onCellClickRef = useRef(onCellClick);
   const onMapClickRef = useRef(onMapClick);
   const onOverlayStatusRef = useRef(onOverlayStatus);
@@ -400,6 +415,26 @@ export default function MapView({
     // The compass earns its place once the view can be tilted and rotated.
     map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+
+    if (showUserLocation) {
+      const geolocate = new maplibregl.GeolocateControl({
+        positionOptions: { enableHighAccuracy: true },
+        trackUserLocation: true,
+        showUserLocation: true,
+        showAccuracyCircle: true,
+      });
+      map.addControl(geolocate, "top-right");
+      // Ask once the map is settled. The browser still gates this behind its
+      // own permission prompt, and a refusal simply leaves the control idle.
+      map.once("idle", () => {
+        try {
+          geolocate.trigger();
+        } catch {
+          // Unsupported or blocked; the button stays available manually.
+        }
+      });
+    }
+
     mapRef.current = map;
 
     map.on("click", (e) => {
@@ -461,6 +496,49 @@ export default function MapView({
     });
   }, [mesh, meshVisible, meshOpacity, gridVisible, meshColorMode, meshHeightMode]);
 
+  // Globe projection. Flat mercator is fine for a single site, but the product
+  // opens on "where on earth is this", and a sphere answers that in a way a
+  // stretched rectangle does not.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    return whenStyleReady(map, () => {
+      try {
+        (map as unknown as { setProjection: (p: unknown) => void }).setProjection({
+          type: globe ? "globe" : "mercator",
+        });
+      } catch (err) {
+        // An older renderer just stays flat; nothing else depends on this.
+        console.error("projection unavailable", err);
+      }
+    });
+  }, [globe]);
+
+  // The opening flight: start far out, then descend to the target.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !introFlight || introDoneRef.current) return;
+    introDoneRef.current = true;
+    introActiveRef.current = true;
+
+    map.jumpTo({ center: [center[1], center[0]], zoom: 1.3, pitch: 0, bearing: 0 });
+    const timer = setTimeout(() => {
+      map.flyTo({
+        center: [center[1], center[0]],
+        zoom,
+        speed: 0.55,
+        curve: 1.5,
+        essential: true,
+      });
+      map.once("moveend", () => {
+        introActiveRef.current = false;
+      });
+    }, 700);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introFlight]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -473,9 +551,11 @@ export default function MapView({
         map.setLayoutProperty(id, "visibility", active.has(id) ? "visible" : "none");
         if (active.has(id)) map.setPaintProperty(id, "raster-opacity", imageryOpacity);
       }
-      // The street map stays under the photo rather than being swapped out, so
-      // fading the photo reveals roads and place names underneath it.
-      map.setLayoutProperty("streets", "visibility", "visible");
+      // The street map sits under the photo rather than replacing it, so fading
+      // the photo reveals roads and place names - but it is only worth drawing
+      // when some of it will actually show through.
+      const streetsUseful = !imagery || imageryOpacity < 0.98;
+      map.setLayoutProperty("streets", "visibility", streetsUseful ? "visible" : "none");
       // Imagery carries no place names of its own, so labels only earn their
       // place over it - and only while the photo is opaque enough to hide the
       // street map's own labels.
@@ -504,7 +584,7 @@ export default function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || introActiveRef.current) return;
     if (fitBounds) {
       map.fitBounds(fitBounds, { padding: 40, duration: 600, maxZoom: maxFitZoom });
       return;

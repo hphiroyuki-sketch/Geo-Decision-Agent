@@ -699,6 +699,8 @@ export default function MeshView() {
           markers={markers}
           fitBounds={bounds}
           maxFitZoom={18}
+          globe={false}
+          showUserLocation
           onCellClick={setSelected}
           onOverlayStatus={setOverlayOk}
           onMapClick={

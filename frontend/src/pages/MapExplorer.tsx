@@ -101,6 +101,9 @@ export default function MapExplorer() {
         meshVisible={meshVisible}
         markers={markers}
         fitBounds={bounds}
+        globe={!detail}
+        introFlight
+        showUserLocation
         onCellClick={setSelected}
       />
 

@@ -144,12 +144,18 @@ export default function Home() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-6 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100">
           <div className="font-medium text-sm text-slate-800">プロジェクトマップ</div>
-          <div className="text-xs text-slate-500">プロジェクトの概要と対象エリア</div>
+          <div className="text-xs text-slate-500">
+            衛星画像の地球儀から対象エリアへ。右上のボタンで現在地に移動できます。
+          </div>
         </div>
         <div className="h-80">
           <MapView
             center={[36.2048, 138.2529]}
             zoom={5}
+            basemap="satellite"
+            globe
+            introFlight
+            showUserLocation
             markers={projects
               .filter((p) => p.center_lat && p.center_lng)
               .map((p) => ({ lat: p.center_lat, lng: p.center_lng, label: p.name }))}
@@ -168,7 +174,13 @@ export default function Home() {
               className="text-left bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow"
             >
               <div className="h-28">
-                <MapView center={[p.center_lat, p.center_lng]} zoom={9} markers={[{ lat: p.center_lat, lng: p.center_lng, label: p.name }]} />
+                <MapView
+                  center={[p.center_lat, p.center_lng]}
+                  zoom={9}
+                  basemap="satellite"
+                  globe={false}
+                  markers={[{ lat: p.center_lat, lng: p.center_lng, label: p.name }]}
+                />
               </div>
               <div className="p-4">
                 <div className="font-medium text-slate-800 mb-1">{p.name}</div>

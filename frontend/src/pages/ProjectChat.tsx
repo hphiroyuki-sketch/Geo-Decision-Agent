@@ -277,6 +277,8 @@ export default function ProjectChat() {
           labelsVisible={controls.labelsVisible}
           terrain3d={controls.terrain3d}
           terrainExaggeration={controls.exaggeration}
+          globe={false}
+          showUserLocation
         />
 
         <div className="absolute top-3 right-3 z-10 w-56 max-h-[calc(100%-1.5rem)] overflow-y-auto">
