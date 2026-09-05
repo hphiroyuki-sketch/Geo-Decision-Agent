@@ -11,7 +11,7 @@ export default function DisplayModeSwitch({ compact = false }: { compact?: boole
   return (
     <div className="relative">
       <div
-        className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5"
+        className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5 w-full"
         onMouseEnter={() => setShowHint(true)}
         onMouseLeave={() => setShowHint(false)}
       >
@@ -22,7 +22,7 @@ export default function DisplayModeSwitch({ compact = false }: { compact?: boole
             onClick={() => setMode(m.id)}
             aria-pressed={mode === m.id}
             title={m.hint}
-            className={`text-[11px] px-2 py-1 rounded-md transition-colors ${
+            className={`text-[11px] px-2 py-1 rounded-md transition-colors whitespace-nowrap flex-1 ${
               mode === m.id ? "bg-white text-slate-800 shadow-sm font-medium" : "text-slate-500 hover:text-slate-700"
             }`}
           >

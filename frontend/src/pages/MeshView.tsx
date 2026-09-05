@@ -11,11 +11,19 @@ import {
   MapPin,
   SlidersHorizontal,
   Map as MapIcon,
+  Mountain,
+  Maximize2,
+  Printer,
+  Ruler,
 } from "lucide-react";
 import { api } from "../lib/api";
 import MapView, { type CellProperties, type MapMarker } from "../components/MapView";
-import MapControlPanel, { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
+import { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
 import { Term, Hint, EmptyState } from "../components/Explain";
+import LayerRail, { type LayerSpec } from "../components/ui/LayerRail";
+import Legend from "../components/ui/Legend";
+import SourceChips from "../components/ui/SourceChips";
+import AgentSteps, { type AgentStep } from "../components/ui/AgentSteps";
 
 interface MeshRow {
   id: string;
@@ -96,6 +104,14 @@ const CLASS_ICON: Record<string, typeof Sprout> = {
   changed: TriangleAlert,
 };
 
+const CLASS_TEXT: Record<string, string> = {
+  priority_a: "優先度A（保全優先）",
+  similar: "類似環境（回復候補）",
+  changed: "大きな変化（要現地確認）",
+  baseline: "一般区域",
+  unscored: "未評価",
+};
+
 function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
@@ -106,6 +122,14 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * V-03 AI調査と10mメッシュ.
+ *
+ * Dark ground, map dominant, panels floating over it: the imagery is the
+ * evidence and everything else is annotation on top of it. The layer rail gives
+ * each overlay its own opacity because the reason to fade the mesh is to see
+ * what is underneath - one global slider cannot do that.
+ */
 export default function MeshView() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -118,12 +142,10 @@ export default function MeshView() {
   const [error, setError] = useState<string | null>(null);
 
   const [controls, setControls] = useState<MapControlState>(DEFAULT_MAP_CONTROLS);
-  // Mobile has no room for a settings column beside a map, so they take turns.
+  const [recordsVisible, setRecordsVisible] = useState(true);
+  const [railOpen, setRailOpen] = useState(true);
   const [mobileView, setMobileView] = useState<"settings" | "map">("settings");
   const [selected, setSelected] = useState<CellProperties | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
-  // Distinguishes "no analysis" from "analysis exists but the map could not
-  // draw it" - the two look identical on screen and need different fixes.
   const [overlayOk, setOverlayOk] = useState<boolean | null>(null);
 
   const [cellSizeM, setCellSizeM] = useState(10);
@@ -163,7 +185,6 @@ export default function MeshView() {
     if (activeMeshId) loadDetail(activeMeshId);
   }, [activeMeshId, loadDetail]);
 
-  // The centre the next run would use, given the current choice.
   const plannedCenter = useMemo((): { lat: number; lng: number } | null => {
     if (centerMode === "manual") {
       const parts = manualCenter.split(/[,\s]+/).filter(Boolean).map(Number);
@@ -188,16 +209,32 @@ export default function MeshView() {
   const overLimit = cellCount > (context?.maxCells ?? 2500);
   const estimateSec = Math.ceil((cellCount / 16) * (detectChange ? 3 : 2));
 
+  /** The run, shown as stages so a long wait reads as progress, not a hang. */
+  const runSteps: AgentStep[] | null = useMemo(() => {
+    if (!busy && !progress) return null;
+    const sampling = progress ? progress.done / Math.max(1, progress.total) : 0;
+    return [
+      { label: "解析範囲をグリッド化", detail: `${cellCount.toLocaleString()}マス（1マス${cellSizeM}m）`, status: "done" },
+      {
+        label: "衛星データを1マスずつ取得",
+        detail: progress ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} マス取得済み` : "開始しています",
+        status: sampling >= 1 ? "done" : "running",
+      },
+      {
+        label: detectChange ? "前年と比較し変化を算出" : "類似度を算出",
+        status: sampling >= 1 ? "running" : "waiting",
+      },
+      { label: "隣接マスを区域化し優先順位を決定", status: sampling >= 1 ? "running" : "waiting" },
+    ];
+  }, [busy, progress, cellCount, cellSizeM, detectChange]);
+
   const runSampling = async (meshId: string, total: number) => {
     cancelRef.current = false;
     let remaining = total;
     let guard = 0;
     while (remaining > 0 && !cancelRef.current && guard < 400) {
       guard++;
-      const res = await api.post<{ sampled: number; failed: number; remaining: number }>(
-        `/meshes/${meshId}/sample`,
-        {},
-      );
+      const res = await api.post<{ sampled: number; failed: number; remaining: number }>(`/meshes/${meshId}/sample`, {});
       remaining = res.remaining;
       setProgress({ done: total - remaining, total });
       if (res.sampled === 0 && res.failed === 0) break;
@@ -247,9 +284,10 @@ export default function MeshView() {
     const hotspotMarkers = (detail?.hotspots ?? []).map((h) => ({
       lat: h.center_lat,
       lng: h.center_lng,
-      label: `#${h.rank} ${h.area_ha.toFixed(2)}ha`,
+      label: `#${h.rank} ${CLASS_TEXT[h.cell_class] ?? h.cell_class} ${h.area_ha.toFixed(2)}ha`,
       color: detail?.legend.find((l) => l.key === h.cell_class)?.color ?? "#1f7a4d",
     }));
+    if (!recordsVisible) return hotspotMarkers;
     const referenceMarkers = (context?.confirmedRecords ?? []).map((r) => ({
       lat: r.lat,
       lng: r.lng,
@@ -257,14 +295,12 @@ export default function MeshView() {
       color: "#2563eb",
     }));
     return [...hotspotMarkers, ...referenceMarkers];
-  }, [detail, context]);
+  }, [detail, context, recordsVisible]);
 
   const noHotspots = detail && detail.hotspots.length === 0 && detail.geojson.features.length > 0;
   const simMax = stats?.stats?.sim_max ?? null;
 
   // A mesh where nearly every cell lands in one class cannot rank anything.
-  // It is arithmetically correct and practically useless, so it gets said
-  // plainly rather than shown as a uniformly coloured square.
   const dominant = useMemo(() => {
     if (!stats?.byClass?.length || !stats.stats?.sampled) return null;
     const top = [...stats.byClass].sort((a, b) => b.n - a.n)[0];
@@ -272,87 +308,158 @@ export default function MeshView() {
     return share >= 0.9 ? { cellClass: top.cell_class, share } : null;
   }, [stats]);
 
-  const CLASS_TEXT: Record<string, string> = {
-    priority_a: "優先度A（保全優先）",
-    similar: "類似環境（回復候補）",
-    changed: "大きな変化（要現地確認）",
-    baseline: "一般区域",
-    unscored: "未評価",
+  const layers: LayerSpec[] = [
+    {
+      id: "imagery",
+      label: "衛星画像",
+      swatch: "linear-gradient(135deg,#2d4a35,#5d7a4a,#8a9b6d)",
+      visible: controls.basemap === "satellite",
+      opacity: controls.imageryOpacity,
+      hint: "下げると道路・地名の地図が透けて、写真に何が写っているか確認できます。",
+    },
+    {
+      id: "mesh",
+      label: `${detail?.mesh.cell_size_m ?? 10}mメッシュ`,
+      swatch: "linear-gradient(135deg,#3f9f5e,#c9a227,#c0392b)",
+      visible: controls.meshVisible,
+      opacity: controls.meshOpacity,
+    },
+    {
+      id: "grid",
+      label: "マスの境界線",
+      swatch: "linear-gradient(#8ba0b4 1px, transparent 1px), linear-gradient(90deg,#8ba0b4 1px, transparent 1px)",
+      visible: controls.gridVisible,
+      opacity: 1,
+      fixedOpacity: true,
+    },
+    {
+      id: "records",
+      label: "現地記録（基準地点）",
+      swatch: "#2563eb",
+      visible: recordsVisible,
+      opacity: 1,
+      fixedOpacity: true,
+    },
+    {
+      id: "labels",
+      label: "地名ラベル",
+      swatch: "#e6edf3",
+      visible: controls.labelsVisible,
+      opacity: 1,
+      fixedOpacity: true,
+    },
+  ];
+
+  const onLayerChange = (layerId: string, patch: Partial<LayerSpec>) => {
+    if (layerId === "imagery") {
+      setControls((c) => ({
+        ...c,
+        basemap: patch.visible === undefined ? c.basemap : patch.visible ? "satellite" : "streets",
+        imageryOpacity: patch.opacity ?? c.imageryOpacity,
+      }));
+    } else if (layerId === "mesh") {
+      setControls((c) => ({
+        ...c,
+        meshVisible: patch.visible ?? c.meshVisible,
+        meshOpacity: patch.opacity ?? c.meshOpacity,
+      }));
+    } else if (layerId === "grid") {
+      setControls((c) => ({ ...c, gridVisible: patch.visible ?? c.gridVisible }));
+    } else if (layerId === "labels") {
+      setControls((c) => ({ ...c, labelsVisible: patch.visible ?? c.labelsVisible }));
+    } else if (layerId === "records") {
+      setRecordsVisible((v) => patch.visible ?? v);
+    }
   };
 
+  const legendEntries = detail
+    ? [
+        ...detail.legend.map((l) => ({ key: l.key, label: l.label, color: l.color })),
+        { key: "ref", label: "現地確認済み地点", color: "#2563eb", shape: "dot" as const },
+        { key: "grid", label: `${detail.mesh.cell_size_m}mグリッド`, color: "#8ba0b4", shape: "grid" as const },
+      ]
+    : [];
+
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-3.5rem-4rem)] md:h-screen">
-      <div className="lg:hidden flex border-b border-slate-200 bg-white shrink-0">
-        <button
-          onClick={() => setMobileView("settings")}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
-            mobileView === "settings"
-              ? "border-[var(--gda-green)] text-[var(--gda-green)]"
-              : "border-transparent text-slate-400"
-          }`}
-        >
-          <SlidersHorizontal size={14} /> 設定・結果
-        </button>
-        <button
-          onClick={() => setMobileView("map")}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
-            mobileView === "map"
-              ? "border-[var(--gda-green)] text-[var(--gda-green)]"
-              : "border-transparent text-slate-400"
-          }`}
-        >
-          <MapIcon size={14} /> 地図
-        </button>
+    <div className="theme-dark flex flex-col lg:flex-row h-[calc(100vh-3.5rem-4rem)] md:h-screen bg-[var(--gda-ink)] text-[var(--gda-ink-text)]">
+      <div className="lg:hidden flex border-b border-[var(--gda-ink-line)] bg-[var(--gda-ink-2)] shrink-0">
+        {(
+          [
+            ["settings", "調査条件・結果", SlidersHorizontal],
+            ["map", "地図", MapIcon],
+          ] as const
+        ).map(([key, label, Icon]) => (
+          <button
+            key={key}
+            onClick={() => setMobileView(key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium border-b-2 ${
+              mobileView === key
+                ? "border-[var(--gda-green)] text-[var(--gda-ink-text)]"
+                : "border-transparent text-[var(--gda-ink-muted)]"
+            }`}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
       </div>
 
+      {/* Left column: what to analyse, then what came back. */}
       <div
-        className={`${mobileView === "settings" ? "block" : "hidden"} lg:block lg:w-[400px] lg:shrink-0 border-r border-slate-200 bg-white overflow-y-auto flex-1 lg:flex-none`}
+        className={`${mobileView === "settings" ? "block" : "hidden"} lg:block lg:w-[380px] xl:w-[400px] lg:shrink-0 border-r border-[var(--gda-ink-line)] bg-[var(--gda-ink-2)] overflow-y-auto flex-1 lg:flex-none scrollbar-dark`}
       >
-        <div className="px-4 py-3 border-b border-slate-100">
-          <div className="text-xs text-slate-400">FR-020 / FR-026</div>
-          <h1 className="font-semibold text-slate-800 text-sm">10mメッシュ解析</h1>
-          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+        <div className="px-4 py-3 border-b border-[var(--gda-ink-line)]">
+          <div className="text-[10px] text-[var(--gda-ink-muted)]">AI調査 / FR-020・FR-026</div>
+          <h1 className="font-semibold text-sm">10mメッシュ解析</h1>
+          <p className="text-[11px] text-[var(--gda-ink-muted)] mt-1 leading-relaxed">
             対象地を10m四方に区切り、1マスずつ衛星データを取得します。「確認済みの生きものがいた場所」とどれだけ似ているか（
             <Term id="similarity">類似度</Term>）と、前年からどれだけ変わったか（<Term id="change">変化スコア</Term>
             ）を判定し、保全すべき場所と回復すべき場所を色分けします。
           </p>
         </div>
 
-        {/* Pre-flight: everything that decides whether the run will be meaningful */}
-        <div className="p-4 space-y-3 border-b border-slate-100">
-          <div className="text-xs font-semibold text-slate-700">1. どこを解析するか</div>
+        {runSteps && (
+          <div className="p-4 border-b border-[var(--gda-ink-line)]">
+            <div className="text-[11px] font-medium mb-2">解析を実行しています</div>
+            <AgentSteps dark steps={runSteps} />
+            {progress && (
+              <div className="mt-2">
+                <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[var(--gda-green)] transition-all"
+                    style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }}
+                  />
+                </div>
+                <div className="text-[10px] text-[var(--gda-ink-muted)] mt-1">
+                  画面を開いたままお待ちください。一度取得した場所は保存されるため、2回目以降は大幅に速くなります。
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="p-4 space-y-3 border-b border-[var(--gda-ink-line)]">
+          <div className="text-xs font-semibold">1. どこを解析するか</div>
           <div className="grid grid-cols-3 gap-1">
-            <button
-              onClick={() => setCenterMode("reference")}
-              disabled={!context?.referenceCentroid}
-              className={`text-[11px] py-1.5 rounded-lg border disabled:opacity-40 ${
-                centerMode === "reference"
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200"
-              }`}
-            >
-              現地記録の中心
-            </button>
-            <button
-              onClick={() => setCenterMode("project")}
-              className={`text-[11px] py-1.5 rounded-lg border ${
-                centerMode === "project"
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200"
-              }`}
-            >
-              プロジェクト中心
-            </button>
-            <button
-              onClick={() => setCenterMode("manual")}
-              className={`text-[11px] py-1.5 rounded-lg border ${
-                centerMode === "manual"
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200"
-              }`}
-            >
-              指定する
-            </button>
+            {(
+              [
+                ["reference", "現地記録の中心"],
+                ["project", "プロジェクト中心"],
+                ["manual", "指定する"],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setCenterMode(mode)}
+                disabled={mode === "reference" && !context?.referenceCentroid}
+                className={`text-[11px] py-1.5 rounded-lg border disabled:opacity-30 ${
+                  centerMode === mode
+                    ? "bg-white text-slate-900 border-white font-medium"
+                    : "bg-white/5 text-[var(--gda-ink-text)] border-[var(--gda-ink-line)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {centerMode === "manual" && (
@@ -361,12 +468,14 @@ export default function MeshView() {
                 value={manualCenter}
                 onChange={(e) => setManualCenter(e.target.value)}
                 placeholder="緯度, 経度（例: 34.7241, 135.4894）"
-                className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+                className="flex-1 bg-black/25 border border-[var(--gda-ink-line)] rounded-lg px-2 py-1.5 text-xs text-[var(--gda-ink-text)] placeholder:text-[var(--gda-ink-muted)]"
               />
               <button
                 onClick={() => setPickOnMap((v) => !v)}
                 className={`text-[11px] px-2 rounded-lg border flex items-center gap-1 ${
-                  pickOnMap ? "bg-[var(--gda-green)] text-white border-[var(--gda-green)]" : "border-slate-200 text-slate-600"
+                  pickOnMap
+                    ? "bg-[var(--gda-green)] text-white border-[var(--gda-green)]"
+                    : "border-[var(--gda-ink-line)] text-[var(--gda-ink-text)]"
                 }`}
               >
                 <Crosshair size={12} /> 地図
@@ -375,12 +484,11 @@ export default function MeshView() {
           )}
 
           {plannedCenter && (
-            <div className="text-[11px] text-slate-500 flex items-center gap-1">
+            <div className="text-[11px] text-[var(--gda-ink-muted)] flex items-center gap-1">
               <MapPin size={11} /> {plannedCenter.lat.toFixed(5)}, {plannedCenter.lng.toFixed(5)}
             </div>
           )}
 
-          {/* The warning that would have saved the last run */}
           {context && context.confirmedRecords.length === 0 && (
             <Hint tone="warn">
               <strong>確認済みの現地記録が0件です。</strong>
@@ -409,9 +517,8 @@ export default function MeshView() {
           {referenceDistanceKm !== null && referenceDistanceKm > 5 && (
             <Hint tone="warn">
               <strong>基準地点がここから約 {referenceDistanceKm.toFixed(0)}km 離れています。</strong>
-              これほど離れた場所は気候も地形も別物なので、類似度はどのマスでも低く出て、
-              保全優先・回復候補は<strong>ほぼ抽出されません</strong>。
-              「現地記録の中心」を選ぶか、解析したい場所の近くで現地記録を登録してください。
+              これほど離れた場所は気候も地形も別物なので、類似度はどのマスでも低く出て、 保全優先・回復候補は
+              <strong>ほぼ抽出されません</strong>。 「現地記録の中心」を選ぶか、解析したい場所の近くで現地記録を登録してください。
             </Hint>
           )}
 
@@ -425,15 +532,15 @@ export default function MeshView() {
           )}
         </div>
 
-        <div className="p-4 space-y-3 border-b border-slate-100">
-          <div className="text-xs font-semibold text-slate-700">2. どのくらい細かく見るか</div>
+        <div className="p-4 space-y-3 border-b border-[var(--gda-ink-line)]">
+          <div className="text-xs font-semibold">2. どのくらい細かく見るか</div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="text-[11px] text-slate-500">1マスの大きさ</span>
+              <span className="text-[11px] text-[var(--gda-ink-muted)]">1マスの大きさ</span>
               <select
                 value={cellSizeM}
                 onChange={(e) => setCellSizeM(Number(e.target.value))}
-                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                className="w-full bg-black/25 border border-[var(--gda-ink-line)] rounded-lg px-2 py-1.5 text-sm text-[var(--gda-ink-text)]"
               >
                 <option value={10}>10 m（最も詳細）</option>
                 <option value={20}>20 m</option>
@@ -441,11 +548,11 @@ export default function MeshView() {
               </select>
             </label>
             <label className="block">
-              <span className="text-[11px] text-slate-500">解析する範囲（一辺）</span>
+              <span className="text-[11px] text-[var(--gda-ink-muted)]">解析する範囲（一辺）</span>
               <select
                 value={extentM}
                 onChange={(e) => setExtentM(Number(e.target.value))}
-                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                className="w-full bg-black/25 border border-[var(--gda-ink-line)] rounded-lg px-2 py-1.5 text-sm text-[var(--gda-ink-text)]"
               >
                 <option value={100}>100 m</option>
                 <option value={200}>200 m</option>
@@ -455,37 +562,31 @@ export default function MeshView() {
               </select>
             </label>
           </div>
-          <label className="flex items-start gap-2 text-[11px] text-slate-600">
+          <label className="flex items-start gap-2 text-[11px] text-[var(--gda-ink-text)]">
             <input
               type="checkbox"
               checked={detectChange}
               onChange={(e) => setDetectChange(e.target.checked)}
-              className="mt-0.5"
+              className="mt-0.5 accent-[var(--gda-green)]"
             />
             <span>
               前年との変化も調べる
-              <span className="text-slate-400">（取得時間は約2倍になります）</span>
+              <span className="text-[var(--gda-ink-muted)]">（取得時間は約2倍になります）</span>
             </span>
           </label>
 
           <div
             className={`text-[11px] rounded-lg px-2.5 py-2 ${
-              overLimit ? "bg-red-50 text-red-700 border border-red-200" : "bg-slate-50 text-slate-600"
+              overLimit ? "bg-rose-500/10 text-rose-300 border border-rose-500/40" : "bg-black/25 text-[var(--gda-ink-text)]"
             }`}
           >
             {cellCount.toLocaleString()} マス
             {overLimit ? (
-              <>
-                {" "}
-                — 上限 {context?.maxCells.toLocaleString()} マスを超えています。範囲を狭めるか、1マスを大きくしてください。
-              </>
+              <> — 上限 {context?.maxCells.toLocaleString()} マスを超えています。範囲を狭めるか、1マスを大きくしてください。</>
             ) : (
               <>
                 {" "}
                 / 所要時間の目安 約 {estimateSec < 60 ? `${estimateSec}秒` : `${Math.ceil(estimateSec / 60)}分`}
-                <span className="block text-slate-400 mt-0.5">
-                  一度取得した場所は保存されるため、2回目以降は大幅に速くなります。
-                </span>
               </>
             )}
           </div>
@@ -498,49 +599,37 @@ export default function MeshView() {
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
             {busy ? "解析中..." : "メッシュ解析を実行"}
           </button>
-          {progress && (
-            <div>
-              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--gda-green)] transition-all"
-                  style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }}
-                />
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">
-                {progress.done.toLocaleString()} / {progress.total.toLocaleString()} マス取得済み
-                <span className="text-slate-400">（画面を開いたままお待ちください）</span>
-              </div>
-            </div>
+          {error && (
+            <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-2">{error}</div>
           )}
-          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{error}</div>}
         </div>
 
         {detail && (
-          <div className="p-4 border-b border-slate-100">
-            <div className="text-xs font-semibold text-slate-700 mb-2">3. 結果</div>
+          <div className="p-4 border-b border-[var(--gda-ink-line)]">
+            <div className="text-xs font-semibold mb-2">3. 結果</div>
 
             {stats?.stats && (
-              <div className="text-[11px] text-slate-600 space-y-1 bg-slate-50 rounded-lg p-2.5 mb-3">
+              <div className="text-[11px] space-y-1 bg-black/25 rounded-lg p-2.5 mb-3">
                 <div className="flex justify-between">
-                  <span>取得マス</span>
-                  <span className="font-medium">{stats.stats.sampled.toLocaleString()}</span>
+                  <span className="text-[var(--gda-ink-muted)]">取得マス</span>
+                  <span className="font-medium tabular-nums">{stats.stats.sampled.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>基準地点</span>
-                  <span className="font-medium">{detail.mesh.reference_points} 地点</span>
+                  <span className="text-[var(--gda-ink-muted)]">基準地点</span>
+                  <span className="font-medium tabular-nums">{detail.mesh.reference_points} 地点</span>
                 </div>
                 {stats.stats.sim_max !== null && (
                   <div className="flex justify-between">
-                    <span>類似度（最小〜最大）</span>
-                    <span className="font-medium">
+                    <span className="text-[var(--gda-ink-muted)]">類似度（最小〜最大）</span>
+                    <span className="font-medium tabular-nums">
                       {stats.stats.sim_min?.toFixed(2)} 〜 {stats.stats.sim_max.toFixed(2)}
                     </span>
                   </div>
                 )}
                 {stats.stats.chg_max !== null && (
                   <div className="flex justify-between">
-                    <span>変化スコア（最大）</span>
-                    <span className="font-medium">{stats.stats.chg_max.toFixed(3)}</span>
+                    <span className="text-[var(--gda-ink-muted)]">変化スコア（最大）</span>
+                    <span className="font-medium tabular-nums">{stats.stats.chg_max.toFixed(3)}</span>
                   </div>
                 )}
               </div>
@@ -549,15 +638,15 @@ export default function MeshView() {
             {overlayOk === false && detail.geojson.features.length > 0 && (
               <Hint tone="warn">
                 <strong>解析結果はありますが、地図に描画できませんでした。</strong>
-                データの問題ではなく表示側の問題です。ページを再読み込みしても直らない場合はお知らせください
-                （ブラウザのコンソールに原因が出力されています）。
+                データの問題ではなく表示側の問題です。ページを再読み込みしても直らない場合はお知らせください。
               </Hint>
             )}
 
             {dominant && (
               <Hint tone="warn">
                 <strong>
-                  取得したマスの {Math.round(dominant.share * 100)}% が「{CLASS_TEXT[dominant.cellClass] ?? dominant.cellClass}」に偏っています。
+                  取得したマスの {Math.round(dominant.share * 100)}% が「{CLASS_TEXT[dominant.cellClass] ?? dominant.cellClass}
+                  」に偏っています。
                 </strong>
                 この状態では区域どうしの優劣がつかず、「どこを優先すべきか」を示せません。
                 {referenceDistanceKm !== null && referenceDistanceKm < 0.2 ? (
@@ -568,28 +657,25 @@ export default function MeshView() {
                     <strong>基準地点から離れた場所を中心に指定</strong>すると、差が出て順位づけができるようになります。
                   </>
                 ) : (
-                  <>
-                    {" "}
-                    解析範囲を広げて環境の異なる場所を含めるか、性質の違う複数地点で現地記録を登録してください。
-                  </>
+                  <> 解析範囲を広げて環境の異なる場所を含めるか、性質の違う複数地点で現地記録を登録してください。</>
                 )}
               </Hint>
             )}
 
-            {/* When nothing crossed a threshold, say so in plain terms and say why */}
             {noHotspots && (
               <Hint tone="info">
                 <strong>重要区域として抽出された場所はありませんでした。</strong>
                 {simMax !== null && stats && (
                   <>
                     {" "}
-                    類似度の最大値は {simMax.toFixed(2)} で、保全優先の判定基準 {stats.thresholds.priorityA} に届いていません。
+                    類似度の最大値は {simMax.toFixed(2)} で、保全優先の判定基準 {stats.thresholds.priorityA}{" "}
+                    に届いていません。
                   </>
                 )}
                 {referenceDistanceKm !== null && referenceDistanceKm > 5 ? (
                   <> 基準地点が約{referenceDistanceKm.toFixed(0)}km離れているためです。近くで現地記録を取り直すと結果が変わります。</>
                 ) : (
-                  <> 下の「類似度で色分け」に切り替えると、しきい値に届かない範囲の濃淡も確認できます。</>
+                  <> 「類似度で色分け」に切り替えると、しきい値に届かない範囲の濃淡も確認できます。</>
                 )}
               </Hint>
             )}
@@ -600,32 +686,32 @@ export default function MeshView() {
                 const Icon = CLASS_ICON[h.cell_class] ?? Sprout;
                 const actions = detail.actions.filter((a) => a.hotspot_id === h.id);
                 return (
-                  <div key={h.id} className="border border-slate-200 rounded-xl p-3">
+                  <div key={h.id} className="border border-[var(--gda-ink-line)] bg-[var(--gda-ink-3)] rounded-xl p-3">
                     <div className="flex items-start gap-2">
                       <span
                         className="mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: `${legend?.color}22`, color: legend?.color }}
+                        style={{ background: `${legend?.color}33`, color: legend?.color }}
                       >
                         <Icon size={14} />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-semibold text-slate-800">
+                        <div className="text-xs font-semibold">
                           #{h.rank} {legend?.label}
                         </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
+                        <div className="text-[11px] text-[var(--gda-ink-muted)] mt-0.5">
                           {h.area_ha.toFixed(2)} ha ・ {h.cell_count} マス ・ <Term id="compactness">連結度</Term>{" "}
                           {h.compactness.toFixed(2)}
                           {h.mean_similarity !== null && ` ・ 類似度 ${h.mean_similarity.toFixed(2)}`}
                           {h.mean_change !== null && ` ・ 変化 ${h.mean_change.toFixed(3)}`}
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
+                        <div className="text-[10.5px] text-[var(--gda-ink-muted)] mt-0.5 font-mono">
                           {h.center_lat.toFixed(5)}, {h.center_lng.toFixed(5)}
                         </div>
                         {actions.length > 0 && (
                           <ul className="mt-2 space-y-1">
                             {actions.map((a) => (
-                              <li key={a.id} className="text-[11px] text-slate-600 leading-snug">
-                                <span className="text-slate-400">[{a.stage}]</span> {a.title}
+                              <li key={a.id} className="text-[11px] leading-snug">
+                                <span className="text-[var(--gda-ink-muted)]">[{a.stage}]</span> {a.title}
                               </li>
                             ))}
                           </ul>
@@ -640,7 +726,7 @@ export default function MeshView() {
             {detail.actions.length > 0 && (
               <Link
                 to={`/projects/${id}/recovery`}
-                className="mt-3 block text-center text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2"
+                className="mt-3 block text-center text-xs font-medium bg-white/5 hover:bg-white/10 border border-[var(--gda-ink-line)] rounded-lg py-2"
               >
                 回復計画 {detail.actions.length} 件を開く
               </Link>
@@ -649,20 +735,22 @@ export default function MeshView() {
         )}
 
         {!detail && !busy && (
-          <EmptyState
-            icon={Grid3x3}
-            title="まだ解析していません"
-            body="上の設定を確認して「メッシュ解析を実行」を押すと、対象地を10m四方に区切って1マスずつ衛星データを取得します。初回は数十秒〜数分かかります。"
-          />
+          <div className="[&_*]:!text-[var(--gda-ink-muted)]">
+            <EmptyState
+              icon={Grid3x3}
+              title="まだ解析していません"
+              body="上の設定を確認して「メッシュ解析を実行」を押すと、対象地を10m四方に区切って1マスずつ衛星データを取得します。初回は数十秒〜数分かかります。"
+            />
+          </div>
         )}
 
         {meshes.length > 1 && (
-          <div className="p-4 border-t border-slate-100">
-            <div className="text-[11px] text-slate-500 mb-1">過去の解析</div>
+          <div className="p-4 border-t border-[var(--gda-ink-line)]">
+            <div className="text-[11px] text-[var(--gda-ink-muted)] mb-1">過去の解析</div>
             <select
               value={activeMeshId ?? ""}
               onChange={(e) => setSearchParams({ mesh: e.target.value })}
-              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+              className="w-full bg-black/25 border border-[var(--gda-ink-line)] rounded-lg px-2 py-1.5 text-xs text-[var(--gda-ink-text)]"
             >
               {meshes.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -672,9 +760,27 @@ export default function MeshView() {
             </select>
           </div>
         )}
+
+        <div className="p-4 border-t border-[var(--gda-ink-line)]">
+          <SourceChips
+            dark
+            sources={[
+              { id: "ae", label: "AlphaEarth", sub: `${context?.year ?? 2024}`, icon: "globe" },
+              { id: "s2", label: "Sentinel-2", icon: "satellite" },
+              {
+                id: "photo",
+                label: "現地記録",
+                sub: `${context?.confirmedRecords.length ?? 0}件`,
+                icon: "photo",
+                active: (context?.confirmedRecords.length ?? 0) > 0,
+              },
+            ]}
+          />
+        </div>
       </div>
 
-      <div className={`${mobileView === "map" ? "block" : "hidden"} lg:block relative flex-1 min-h-0`}>
+      {/* Right: the map, with its chrome floating over it. */}
+      <div className={`${mobileView === "map" ? "block" : "hidden"} lg:block relative flex-1 min-h-0 map-dark`}>
         <MapView
           center={
             detail
@@ -714,79 +820,137 @@ export default function MeshView() {
           }
         />
 
+        {/* Header strip: what you are looking at, and the tools that act on it. */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 z-10 flex items-start gap-2 pointer-events-none">
+          <div className="rounded-lg border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md px-3 py-2 pointer-events-auto min-w-0">
+            <div className="text-xs font-semibold truncate">{context?.project.name ?? "対象地"}</div>
+            <div className="flex flex-wrap gap-x-3 text-[10px] text-[var(--gda-ink-muted)]">
+              {context?.project.areaHa != null && <span>面積 {context.project.areaHa.toLocaleString()} ha</span>}
+              {detail && <span>{detail.mesh.cell_size_m}m グリッド ・ {detail.mesh.extent_m}m 四方</span>}
+              {detail && <span>{detail.mesh.year}年データ</span>}
+            </div>
+          </div>
+
+          <div className="ml-auto flex gap-1.5 pointer-events-auto shrink-0">
+            <button
+              onClick={() => setControls((c) => ({ ...c, terrain3d: !c.terrain3d }))}
+              title="3D地形の表示を切り替えます"
+              className={`flex items-center gap-1 rounded-lg border px-2 py-2 text-[10.5px] backdrop-blur-md ${
+                controls.terrain3d
+                  ? "border-[var(--gda-green)] bg-[var(--gda-green)] text-white"
+                  : "border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] text-[var(--gda-ink-text)]"
+              }`}
+            >
+              <Mountain size={12} /> <span className="hidden sm:inline">3D</span>
+            </button>
+            <button
+              onClick={() => window.print()}
+              title="この画面を印刷 / PDFに保存します"
+              className="flex items-center gap-1 rounded-lg border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md px-2 py-2 text-[10.5px]"
+            >
+              <Printer size={12} /> <span className="hidden sm:inline">印刷</span>
+            </button>
+            <button
+              onClick={() => document.querySelector(".map-dark")?.requestFullscreen?.()}
+              title="全画面表示"
+              className="flex items-center gap-1 rounded-lg border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md px-2 py-2 text-[10.5px]"
+            >
+              <Maximize2 size={12} />
+            </button>
+          </div>
+        </div>
+
         {pickOnMap && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-slate-900 text-white text-xs rounded-full px-3 py-1.5 shadow-lg">
-            解析したい場所を地図上でクリックしてください
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 bg-[var(--gda-green)] text-white text-xs rounded-full px-3 py-1.5 shadow-lg flex items-center gap-1.5">
+            <Crosshair size={12} /> 解析したい場所を地図上でクリックしてください
           </div>
         )}
 
-        <div className="absolute top-3 left-3 z-10 w-60 max-h-[calc(100%-1.5rem)] overflow-y-auto">
-          <MapControlPanel value={controls} onChange={setControls} showMeshDetail hasMesh={Boolean(detail)} />
+        {/* Layer rail + legend. Scrolls on a short screen instead of clipping. */}
+        <div className="absolute top-16 right-2.5 z-10 w-52 max-h-[calc(100%-6rem)] overflow-y-auto scrollbar-dark space-y-2">
+          <LayerRail layers={layers} onChange={onLayerChange} open={railOpen} onToggleOpen={() => setRailOpen((v) => !v)} />
 
           {detail && (
-            <div className="mt-2 bg-white/95 backdrop-blur rounded-xl shadow-sm border border-slate-200 p-3">
-              <div className="text-xs font-semibold text-slate-700 mb-1.5">凡例</div>
-              {controls.meshColorMode === "class" ? (
-                <div className="space-y-1">
-                  {detail.legend.map((l) => (
-                    <div key={l.key} className="flex items-center gap-2 text-[11px] text-slate-600">
-                      <span className="w-3 h-3 rounded-sm" style={{ background: l.color }} />
-                      {l.label}
-                    </div>
+            <>
+              <div className="rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md p-2.5">
+                <div className="text-[10px] text-[var(--gda-ink-muted)] mb-1.5">マスの色分け</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      ["class", "判定"],
+                      ["similarity", "類似度"],
+                      ["change", "変化"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => setControls((c) => ({ ...c, meshColorMode: mode }))}
+                      className={`text-[10.5px] py-1 rounded-md border ${
+                        controls.meshColorMode === mode
+                          ? "bg-[var(--gda-green)] text-white border-[var(--gda-green)]"
+                          : "bg-white/5 text-[var(--gda-ink-text)] border-[var(--gda-ink-line)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
                   ))}
                 </div>
-              ) : controls.meshColorMode === "similarity" ? (
-                <div>
-                  <div className="h-2.5 rounded" style={{ background: "linear-gradient(90deg,#f1f8f4,#96ccae,#2f9e63,#0f5132)" }} />
-                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                    <span>0（似ていない）</span>
-                    <span>1（同じ環境）</span>
-                  </div>
-                </div>
+              </div>
+
+              {controls.meshColorMode === "class" ? (
+                <Legend dark entries={legendEntries} />
               ) : (
-                <div>
-                  <div className="h-2.5 rounded" style={{ background: "linear-gradient(90deg,#fdf5f3,#f0b8a8,#d4623f,#8c2c14)" }} />
-                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                    <span>0（変化なし）</span>
-                    <span>0.3（大きい）</span>
+                <div className="rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md p-2.5">
+                  <div className="text-xs font-semibold mb-1.5">凡例</div>
+                  <div
+                    className="h-2.5 rounded"
+                    style={{
+                      background:
+                        controls.meshColorMode === "similarity"
+                          ? "linear-gradient(90deg,#f1f8f4,#96ccae,#2f9e63,#0f5132)"
+                          : "linear-gradient(90deg,#fdf5f3,#f0b8a8,#d4623f,#8c2c14)",
+                    }}
+                  />
+                  <div className="flex justify-between text-[9.5px] text-[var(--gda-ink-muted)] mt-1">
+                    <span>{controls.meshColorMode === "similarity" ? "0（似ていない）" : "0（変化なし）"}</span>
+                    <span>{controls.meshColorMode === "similarity" ? "1（同じ環境）" : "0.3（大きい）"}</span>
                   </div>
                 </div>
               )}
-              <div className="flex items-center gap-2 text-[11px] text-slate-600 mt-2 pt-2 border-t border-slate-100">
-                <span className="w-3 h-3 rounded-full bg-[#2563eb] border-2 border-white shadow" />
-                基準地点（確認済みの現地記録）
-              </div>
-            </div>
+            </>
           )}
         </div>
 
         {selected && (
-          <div className="absolute bottom-3 left-3 right-3 sm:right-auto sm:w-72 z-10 bg-white/95 backdrop-blur rounded-xl shadow-sm border border-slate-200 p-3">
+          <div className="absolute bottom-3 left-3 right-3 sm:right-auto sm:w-72 z-10 rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.92)] backdrop-blur-md p-3 shadow-xl">
             <div className="flex items-start justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-800">{selected.label}</div>
-              <button onClick={() => setSelected(null)} className="text-slate-400 text-xs">
+              <div className="text-xs font-semibold flex items-center gap-1.5">
+                <Ruler size={12} className="text-[var(--gda-ink-muted)]" />
+                {selected.label}
+              </div>
+              <button onClick={() => setSelected(null)} className="text-[var(--gda-ink-muted)] text-sm leading-none">
                 ×
               </button>
             </div>
-            <dl className="mt-2 space-y-1 text-[11px] text-slate-600">
+            <dl className="mt-2 space-y-1 text-[11px]">
               <div className="flex justify-between">
-                <dt>
+                <dt className="text-[var(--gda-ink-muted)]">
                   <Term id="similarity">基準との類似度</Term>
                 </dt>
-                <dd className="font-medium">{selected.similarity?.toFixed(3) ?? "—"}</dd>
+                <dd className="font-medium tabular-nums">{selected.similarity?.toFixed(3) ?? "—"}</dd>
               </div>
               <div className="flex justify-between">
-                <dt>
+                <dt className="text-[var(--gda-ink-muted)]">
                   <Term id="change">前年比の変化</Term>
                 </dt>
-                <dd className="font-medium">{selected.change?.toFixed(3) ?? "—"}</dd>
+                <dd className="font-medium tabular-nums">{selected.change?.toFixed(3) ?? "—"}</dd>
               </div>
               <div className="flex justify-between">
-                <dt>このマス内の現地記録</dt>
-                <dd className="font-medium">{selected.fieldRecords} 件</dd>
+                <dt className="text-[var(--gda-ink-muted)]">このマス内の現地記録</dt>
+                <dd className="font-medium tabular-nums">{selected.fieldRecords} 件</dd>
               </div>
             </dl>
-            <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+            <p className="text-[10px] text-[var(--gda-ink-muted)] mt-2 leading-relaxed">
               Google Satellite Embedding の実測値です。変化の「原因」は衛星では判定できないため、現地確認が必要です。
             </p>
           </div>

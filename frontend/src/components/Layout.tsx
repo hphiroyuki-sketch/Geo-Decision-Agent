@@ -147,7 +147,7 @@ export default function Layout() {
       </aside>
 
       {/* Mobile top bar */}
-      <header className="md:hidden flex items-center px-4 h-14 shrink-0 bg-[var(--gda-navy)]">
+      <header className="safe-top md:hidden flex items-center px-4 h-14 shrink-0 bg-[var(--gda-navy)] box-content">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-md bg-[var(--gda-green)] flex items-center justify-center text-white font-bold text-sm shrink-0">
             G
@@ -180,7 +180,7 @@ export default function Layout() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--gda-navy)] border-t border-white/10 flex items-stretch h-16">
+      <nav className="safe-bottom md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--gda-navy)] border-t border-white/10 flex items-stretch h-16">
         <NavLink
           to="/dashboard"
           className={({ isActive }) =>

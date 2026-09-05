@@ -111,6 +111,89 @@ dashboardRoutes.get("/", async (c) => {
 });
 
 /** The "対応が必要な項目" feed, ranked by severity then recency (FR-060 の代替）。 */
+/**
+ * V-01's 最近の分析 feed: what the organisation actually did lately, across
+ * every project. A portfolio home that shows only project cards tells you
+ * nothing about whether anyone is working; this row does.
+ */
+dashboardRoutes.get("/recent-activity", async (c) => {
+  const { results: analyses } = await c.env.DB.prepare(
+    `SELECT a.id, a.executed_at AS at, a.candidate_count, a.earth_engine_available,
+            p.id AS project_id, p.name AS project_name, u.name AS actor
+     FROM analyses a
+     JOIN projects p ON p.id = a.project_id
+     LEFT JOIN users u ON u.id = a.run_by
+     ORDER BY a.executed_at DESC LIMIT 8`,
+  ).all<{
+    id: string;
+    at: string;
+    candidate_count: number;
+    earth_engine_available: number;
+    project_id: string;
+    project_name: string;
+    actor: string | null;
+  }>();
+
+  const { results: meshes } = await c.env.DB.prepare(
+    `SELECT m.id, m.created_at AS at, m.cell_size_m, m.extent_m,
+            p.id AS project_id, p.name AS project_name,
+            (SELECT COUNT(*) FROM mesh_cells WHERE mesh_id = m.id AND status = 'sampled') AS sampled
+     FROM meshes m JOIN projects p ON p.id = m.project_id
+     ORDER BY m.created_at DESC LIMIT 8`,
+  ).all<{
+    id: string;
+    at: string;
+    cell_size_m: number;
+    extent_m: number;
+    project_id: string;
+    project_name: string;
+    sampled: number;
+  }>();
+
+  const { results: reports } = await c.env.DB.prepare(
+    `SELECT r.id, r.created_at AS at, r.title, p.id AS project_id, p.name AS project_name
+     FROM decision_reports r JOIN projects p ON p.id = r.project_id
+     ORDER BY r.created_at DESC LIMIT 5`,
+  ).all<{ id: string; at: string; title: string; project_id: string; project_name: string }>();
+
+  const items = [
+    ...analyses.map((a) => ({
+      id: `an-${a.id}`,
+      kind: "analysis" as const,
+      title: `候補地スコアリング（${a.candidate_count}地点）`,
+      projectId: a.project_id,
+      projectName: a.project_name,
+      at: a.at,
+      link: `/projects/${a.project_id}/analysis`,
+      note: a.earth_engine_available ? "衛星実データ" : "シミュレーション",
+    })),
+    ...meshes.map((m) => ({
+      id: `me-${m.id}`,
+      kind: "mesh" as const,
+      title: `${m.cell_size_m}mメッシュ解析（${m.sampled.toLocaleString()}マス取得）`,
+      projectId: m.project_id,
+      projectName: m.project_name,
+      at: m.at,
+      link: `/projects/${m.project_id}/mesh?mesh=${m.id}`,
+      note: `${m.extent_m}m四方`,
+    })),
+    ...reports.map((r) => ({
+      id: `rp-${r.id}`,
+      kind: "report" as const,
+      title: r.title,
+      projectId: r.project_id,
+      projectName: r.project_name,
+      at: r.at,
+      link: `/projects/${r.project_id}/report`,
+      note: null as string | null,
+    })),
+  ]
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .slice(0, 8);
+
+  return c.json({ items });
+});
+
 dashboardRoutes.get("/action-items", async (c) => {
   const items: ActionItem[] = [];
 

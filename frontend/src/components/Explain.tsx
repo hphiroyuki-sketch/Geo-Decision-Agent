@@ -121,7 +121,10 @@ export function Hint({ children, tone = "info" }: { children: ReactNode; tone?: 
   }[tone];
   const Icon = tone === "warn" ? TriangleAlert : tone === "tip" ? Lightbulb : Info;
   return (
-    <div className={`flex gap-2 border rounded-xl px-3 py-2.5 text-[11px] leading-relaxed ${styles}`}>
+    <div
+      className={`gda-hint flex gap-2 border rounded-xl px-3 py-2.5 text-[11px] leading-relaxed ${styles}`}
+      data-tone={tone}
+    >
       <Icon size={14} className="shrink-0 mt-0.5" />
       <div className="min-w-0">{children}</div>
     </div>
@@ -141,7 +144,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="text-center py-12 px-6">
+    <div className="gda-empty text-center py-12 px-6">
       <Icon size={26} className="mx-auto mb-3 text-slate-300" />
       <div className="text-sm font-medium text-slate-700">{title}</div>
       <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">{body}</p>

@@ -157,15 +157,36 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
             if (toolUse.name === "analyze_site_candidates") {
               const input = toolUse.input as { candidates: CandidateInput[]; purpose?: string };
               const eeConfigured = !!c.env.EE_SERVICE_ACCOUNT_JSON;
+
+              // FR-002 / 4.2: the user asked in their own words, so the plan the
+              // request was turned into has to be visible before the answer is.
+              // The stages are announced up front and then reported as they
+              // finish, which is also what makes a wrong answer traceable to the
+              // stage that produced it.
+              const plan = [
+                { label: "評価条件を整理", detail: `対象 ${(input.candidates ?? []).length} 地点／${input.purpose ?? "目的未指定"}` },
+                {
+                  label: "現地記録と重ね合わせ",
+                  detail: "確認済みの観察記録を候補地の周辺2km圏で照合します",
+                },
+                {
+                  label: eeConfigured ? "衛星データを取得（AlphaEarth・Sentinel-2）" : "衛星データ（シミュレーション）",
+                  detail: eeConfigured
+                    ? "埋め込み類似度とNDRE等の指標を実測します"
+                    : "Earth Engine未接続のため推定値で代替します",
+                },
+                { label: "候補地をスコアリング", detail: "同一の評価軸でランキングします" },
+                { label: "ミティゲーション案を作成", detail: "回避 → 低減 → 回復 → オフセットの順で提示します" },
+              ];
+              send("plan", { steps: plan });
+              const advance = (index: number) => send("step", { index, label: plan[index].label });
+
               steps.push({ label: "AlphaEarthで類似環境・変化を分析中", status: "done" });
-              send("step", {
-                label: eeConfigured
-                  ? "Earth Engine実データ・現地記録と重ね合わせて分析中"
-                  : "候補地の生物多様性影響を分析中（シミュレーション）",
-              });
+              advance(0);
 
               const overrides: Record<string, RealDataOverride> = {};
               let referencePointCount = 0;
+              advance(1);
               if (conversation.project_id) {
                 const year = Number(await getSetting(c.env.DB, "earth_engine_year", "2024"));
                 const referenceEmbedding = await getReferenceEmbedding(c.env, c.env.DB, conversation.project_id, year);
@@ -175,6 +196,7 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                   const override: RealDataOverride = {};
 
                   if (cand.lat != null && cand.lng != null) {
+                    advance(2);
                     const nearby = await findNearbyFieldRecords(c.env.DB, conversation.project_id, cand.lat, cand.lng);
                     override.fieldRecordsCount = nearby.length;
                     override.confirmedFieldRecordsCount = nearby.filter((n) => n.review_status === "confirmed").length;
@@ -212,7 +234,9 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                 }
               }
 
+              advance(3);
               const results = analyzeCandidates(`${conversation.project_id ?? conversationId}`, input.candidates ?? [], overrides);
+              advance(4);
 
               if (conversation.project_id) {
                 const analysisId = newId("an");

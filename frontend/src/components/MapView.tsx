@@ -57,6 +57,9 @@ interface MapViewProps {
   onOverlayStatus?: (ok: boolean) => void;
   /** Renders the earth as a sphere rather than a flat sheet. */
   globe?: boolean;
+  /** Zoom, compass and scale controls. Off for card-sized thumbnails, where
+   *  the chrome would take up more room than the map it sits on. */
+  chrome?: boolean;
   /** Opens on the globe and flies down to the target, the way an atlas hands
    *  you the context before the detail. */
   introFlight?: boolean;
@@ -383,6 +386,7 @@ export default function MapView({
   globe = true,
   introFlight = false,
   showUserLocation = false,
+  chrome = true,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -413,8 +417,10 @@ export default function MapView({
       attributionControl: { compact: true },
     });
     // The compass earns its place once the view can be tilted and rotated.
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+    if (chrome) {
+      map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
+      map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+    }
 
     if (showUserLocation) {
       const geolocate = new maplibregl.GeolocateControl({

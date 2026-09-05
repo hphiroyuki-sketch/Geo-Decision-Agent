@@ -34,9 +34,17 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
+export interface PlanStep {
+  label: string;
+  detail?: string;
+}
+
 export interface SSEHandlers {
   onDelta?: (text: string) => void;
-  onStep?: (label: string) => void;
+  /** The whole plan, announced before any of it runs (FR-002). */
+  onPlan?: (steps: PlanStep[]) => void;
+  /** Reports which plan stage is now running. */
+  onStep?: (label: string, index?: number) => void;
   onAnalysisSaved?: (data: { analysisId: string; candidateCount: number }) => void;
   onBudgetExceeded?: (data: { message: string; spentJpySoFar: number; monthlyBudgetJpy: number }) => void;
   onDone?: (data: { costJpy: number }) => void;
@@ -81,8 +89,11 @@ export async function streamChat(conversationId: string, content: string, handle
         case "delta":
           handlers.onDelta?.(parsed.text);
           break;
+        case "plan":
+          handlers.onPlan?.(parsed.steps);
+          break;
         case "step":
-          handlers.onStep?.(parsed.label);
+          handlers.onStep?.(parsed.label, parsed.index);
           break;
         case "analysis_saved":
           handlers.onAnalysisSaved?.(parsed);
