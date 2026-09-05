@@ -16,9 +16,13 @@ import {
   Printer,
   Ruler,
   FlaskConical,
+  Scan,
+  MapPinPlus,
+  Check,
+  X,
 } from "lucide-react";
 import { api } from "../lib/api";
-import MapView, { type CellProperties, type MapMarker } from "../components/MapView";
+import MapView, { type CellProperties, type MapMarker, type Viewport } from "../components/MapView";
 import { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
 import { Term, Hint, EmptyState } from "../components/Explain";
 import LayerRail, { type LayerSpec } from "../components/ui/LayerRail";
@@ -79,12 +83,22 @@ interface MeshDetail {
 
 interface MeshContext {
   project: { name: string; centerLat: number | null; centerLng: number | null; areaHa: number | null };
-  confirmedRecords: { id: string; lat: number; lng: number; species_guess: string | null; demo: number }[];
+  confirmedRecords: {
+    id: string;
+    lat: number;
+    lng: number;
+    species_guess: string | null;
+    demo: number;
+    source: string;
+  }[];
   unreviewedCount: number;
   referenceCentroid: { lat: number; lng: number } | null;
   /** Greatest distance between two confirmed records, in metres. */
   referenceSpreadM: number | null;
   demoRecords: number;
+  /** Reference points designated on the map rather than visited. */
+  mapPinCount: number;
+  fieldRecordCount: number;
   year: number;
   maxCells: number;
 }
@@ -159,6 +173,10 @@ export default function MeshView() {
   const [manualCenter, setManualCenter] = useState("");
   const [pickOnMap, setPickOnMap] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
+  const [viewport, setViewport] = useState<Viewport | null>(null);
+  const [pinMode, setPinMode] = useState(false);
+  const [pins, setPins] = useState<{ lat: number; lng: number }[]>([]);
+  const [pinBusy, setPinBusy] = useState(false);
   const cancelRef = useRef(false);
 
   const activeMeshId = searchParams.get("mesh");
@@ -189,6 +207,13 @@ export default function MeshView() {
   useEffect(() => {
     if (activeMeshId) loadDetail(activeMeshId);
   }, [activeMeshId, loadDetail]);
+
+  // Pins already saved for this project become the editable set, so the map
+  // shows what the analysis will actually compare against.
+  useEffect(() => {
+    if (!context) return;
+    setPins(context.confirmedRecords.filter((r) => r.source === "map_pin").map((r) => ({ lat: r.lat, lng: r.lng })));
+  }, [context]);
 
   const plannedCenter = useMemo((): { lat: number; lng: number } | null => {
     if (centerMode === "manual") {
@@ -339,6 +364,61 @@ export default function MeshView() {
     }
   };
 
+  /**
+   * The grid that fits what the viewer is looking at.
+   *
+   * The cell budget is a platform limit, not a preference, so rather than
+   * making the user discover it by hitting it, the visible area picks the
+   * finest cell size that fits. 10m is kept wherever it can be - it is the
+   * resolution the product is about - and only coarsens when the area demands.
+   */
+  const gridForViewport = (v: Viewport): { extentM: number; cellSizeM: number } => {
+    const visible = Math.min(v.widthM, v.heightM);
+    const extentOptions = [100, 200, 400, 1000, 2000];
+    const extent = extentOptions.filter((e) => e <= visible).pop() ?? extentOptions[0];
+    const budget = context?.maxCells ?? 2500;
+    const cell = [10, 20, 50].find((c) => (extent / c) ** 2 <= budget) ?? 50;
+    return { extentM: extent, cellSizeM: cell };
+  };
+
+  /** "Analyse what I am looking at": the visible area becomes the grid. */
+  const useViewportAsTarget = () => {
+    if (!viewport) return;
+    const { extentM: e, cellSizeM: cs } = gridForViewport(viewport);
+    setExtentM(e);
+    setCellSizeM(cs);
+    setCenterMode("manual");
+    setManualCenter(`${viewport.centerLat.toFixed(6)}, ${viewport.centerLng.toFixed(6)}`);
+    setMobileView("settings");
+  };
+
+  const saveReferencePins = async () => {
+    if (!id || pins.length === 0) return;
+    setPinBusy(true);
+    setError(null);
+    try {
+      await api.post(`/projects/${id}/reference-pins`, { points: pins });
+      await reloadContext();
+      setPinMode(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  const clearReferencePins = async () => {
+    if (!id) return;
+    setPinBusy(true);
+    try {
+      await api.del(`/projects/${id}/reference-pins`);
+      setPins([]);
+      await reloadContext();
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
   const reloadContext = async () => {
     if (!id) return;
     setContext(await api.get<MeshContext>(`/projects/${id}/mesh-context`));
@@ -389,15 +469,24 @@ export default function MeshView() {
       label: `#${h.rank} ${CLASS_TEXT[h.cell_class] ?? h.cell_class} ${h.area_ha.toFixed(2)}ha`,
       color: detail?.legend.find((l) => l.key === h.cell_class)?.color ?? "#1f7a4d",
     }));
-    if (!recordsVisible) return hotspotMarkers;
-    const referenceMarkers = (context?.confirmedRecords ?? []).map((r) => ({
-      lat: r.lat,
-      lng: r.lng,
-      label: `基準地点（確認済み）: ${r.species_guess ?? "種未記入"}`,
-      color: "#2563eb",
-    }));
-    return [...hotspotMarkers, ...referenceMarkers];
-  }, [detail, context, recordsVisible]);
+    // Unsaved pins show while placing them, so the map reflects the edit.
+    const pinMarkers = pinMode
+      ? pins.map((p, i) => ({ lat: p.lat, lng: p.lng, label: `基準地点 ${i + 1}（未保存）`, color: "#f59e0b" }))
+      : [];
+    if (!recordsVisible) return [...hotspotMarkers, ...pinMarkers];
+    const referenceMarkers = pinMode
+      ? []
+      : (context?.confirmedRecords ?? []).map((r) => ({
+          lat: r.lat,
+          lng: r.lng,
+          label:
+            r.source === "map_pin"
+              ? `基準地点（地図で指定・現地未確認）`
+              : `基準地点（現地確認済み）: ${r.species_guess ?? "種未記入"}`,
+          color: r.source === "map_pin" ? "#f59e0b" : "#2563eb",
+        }));
+    return [...hotspotMarkers, ...referenceMarkers, ...pinMarkers];
+  }, [detail, context, recordsVisible, pinMode, pins]);
 
   const noHotspots = detail && detail.hotspots.length === 0 && detail.geojson.features.length > 0;
   const simMax = stats?.stats?.sim_max ?? null;
@@ -593,27 +682,32 @@ export default function MeshView() {
 
           {context && context.confirmedRecords.length === 0 && (
             <Hint tone="warn">
-              <strong>確認済みの現地記録が0件です。</strong>
-              このままだと「似ている場所」の判定ができず、前年との変化しか出ません。
-              {context.unreviewedCount > 0 ? (
-                <>
-                  {" "}
-                  未査読の記録が {context.unreviewedCount} 件あります。
-                  <Link to={`/projects/${id}/field`} className="underline font-medium">
-                    現地記録を確認済みにする
-                  </Link>
-                  と、保全優先・回復候補の判定が有効になります。
-                </>
-              ) : (
-                <>
-                  {" "}
-                  <Link to={`/projects/${id}/field`} className="underline font-medium">
-                    現地記録を登録
-                  </Link>
-                  し、査読して「確認済み」にしてください。
-                </>
+              <strong>基準となる場所がまだ指定されていません。</strong>
+              「似ている場所」は<strong>基準地点との比較</strong>で判定するため、このままでは前年との変化しか出ません。
+              いちばん早いのは、地図で
+              <button onClick={() => setPinMode(true)} className="underline font-medium mx-0.5">
+                基準にする環境を指定
+              </button>
+              する方法です（衛星画像を見ながら2〜5か所クリックするだけ）。
+              現地に行ける場合は
+              <Link to={`/projects/${id}/field`} className="underline font-medium mx-0.5">
+                現地記録を登録
+              </Link>
+              して査読すると、より確かな根拠になります。
+              {context.unreviewedCount > 0 && (
+                <> なお未査読の記録が {context.unreviewedCount} 件あります。</>
               )}
             </Hint>
+          )}
+
+          {context && context.mapPinCount > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200">
+              基準地点 {context.mapPinCount} 点は<strong>地図上で指定</strong>されたものです（現地未確認）。
+              判定の裏付けとしては現地確認済みの記録より弱いため、レポートに使う際は現地確認を計画してください。
+              {context.fieldRecordCount > 0 && (
+                <> 現地確認済みの記録 {context.fieldRecordCount} 件と合わせて基準にしています。</>
+              )}
+            </div>
           )}
 
           {referenceDistanceKm !== null && referenceDistanceKm > 5 && (
@@ -641,7 +735,7 @@ export default function MeshView() {
             </Hint>
           )}
 
-          {referenceDistanceKm !== null && referenceDistanceKm <= 0.3 && (
+          {referenceDistanceKm !== null && referenceDistanceKm <= 0.3 && (context?.referenceSpreadM ?? 0) < 150 && (
             <Hint tone="info">
               基準地点までの距離が約 {(referenceDistanceKm * 1000).toFixed(0)}m と近いため、類似度が高く出ます。
               これが「環境が似ている」ためか「単に近い」ためかは区別できません。
@@ -1008,14 +1102,17 @@ export default function MeshView() {
           showUserLocation
           onCellClick={setSelected}
           onOverlayStatus={setOverlayOk}
+          onViewportChange={setViewport}
           onMapClick={
-            pickOnMap
-              ? (lat, lng) => {
-                  setManualCenter(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-                  setCenterMode("manual");
-                  setPickOnMap(false);
-                }
-              : undefined
+            pinMode
+              ? (lat, lng) => setPins((prev) => (prev.length >= 12 ? prev : [...prev, { lat, lng }]))
+              : pickOnMap
+                ? (lat, lng) => {
+                    setManualCenter(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                    setCenterMode("manual");
+                    setPickOnMap(false);
+                  }
+                : undefined
           }
         />
 
@@ -1065,8 +1162,87 @@ export default function MeshView() {
           </div>
         )}
 
+        {/* The two actions that operate on what is actually on screen. They sit
+            on the map, not in the settings column, because both are about the
+            view: "this habitat" and "this area". */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 w-[min(92%,30rem)]">
+          {pinMode ? (
+            <div className="w-full rounded-xl border border-amber-500/50 bg-[rgba(11,22,34,0.94)] backdrop-blur-md p-3 shadow-2xl">
+              <div className="flex items-start gap-2">
+                <MapPinPlus size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] leading-snug flex-1 min-w-0">
+                  <strong className="text-amber-300">基準にしたい環境を地図上でクリックしてください。</strong>
+                  <br />
+                  衛星画像を見ながら、守りたい／基準にしたい環境（例：まとまった森林）を
+                  <strong>2〜5か所</strong>、少し離して指定します。ここが「似ている場所」を探す基準になります。
+                  <span className="block mt-1 text-[var(--gda-ink-muted)]">
+                    これは衛星画像上の指定であり、現地確認の記録にはなりません。
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[11px] text-[var(--gda-ink-muted)] tabular-nums">{pins.length} 点</span>
+                {pins.length > 0 && (
+                  <button
+                    onClick={() => setPins((p) => p.slice(0, -1))}
+                    className="text-[11px] text-[var(--gda-ink-muted)] underline"
+                  >
+                    1つ戻す
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setPinMode(false);
+                    setPins(
+                      (context?.confirmedRecords ?? [])
+                        .filter((r) => r.source === "map_pin")
+                        .map((r) => ({ lat: r.lat, lng: r.lng })),
+                    );
+                  }}
+                  className="ml-auto flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg border border-[var(--gda-ink-line)]"
+                >
+                  <X size={12} /> やめる
+                </button>
+                <button
+                  onClick={saveReferencePins}
+                  disabled={pins.length === 0 || pinBusy}
+                  className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-amber-500 text-slate-900 disabled:opacity-40"
+                >
+                  <Check size={12} /> {pinBusy ? "保存中..." : `${pins.length}点を基準にする`}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={() => setPinMode(true)}
+                className="flex items-center gap-1.5 rounded-full border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.9)] backdrop-blur-md px-3.5 py-2 text-[11px] font-medium shadow-xl"
+              >
+                <MapPinPlus size={13} className="text-amber-400" />
+                {context && context.mapPinCount > 0 ? `基準地点を編集（${context.mapPinCount}点）` : "基準にする環境を指定"}
+              </button>
+              {viewport && (
+                <button
+                  onClick={useViewportAsTarget}
+                  className="flex items-center gap-1.5 rounded-full bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] px-3.5 py-2 text-[11px] font-semibold text-white shadow-xl"
+                >
+                  <Scan size={13} />
+                  この表示範囲で解析（
+                  {(() => {
+                    const g = gridForViewport(viewport);
+                    return `${g.extentM >= 1000 ? `${g.extentM / 1000}km` : `${g.extentM}m`}四方・${g.cellSizeM}m`;
+                  })()}
+                  ）
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Layer rail + legend. Scrolls on a short screen instead of clipping. */}
-        <div className="absolute top-16 right-2.5 z-10 w-52 max-h-[calc(100%-6rem)] overflow-y-auto scrollbar-dark space-y-2">
+        <div
+          className={`${pinMode ? "hidden" : ""} absolute top-16 right-2.5 z-10 w-52 max-h-[calc(100%-10rem)] overflow-y-auto scrollbar-dark space-y-2`}
+        >
           <LayerRail layers={layers} onChange={onLayerChange} open={railOpen} onToggleOpen={() => setRailOpen((v) => !v)} />
 
           {detail && (

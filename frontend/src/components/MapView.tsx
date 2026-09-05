@@ -66,6 +66,18 @@ interface MapViewProps {
   /** Shows and follows the viewer's own position - the thing a surveyor needs
    *  most while standing in the field. */
   showUserLocation?: boolean;
+  /** Reports what the viewer is currently looking at, so an action can act on
+   *  the visible area rather than on a coordinate typed in a box. */
+  onViewportChange?: (viewport: Viewport) => void;
+}
+
+export interface Viewport {
+  centerLat: number;
+  centerLng: number;
+  /** Width and height of the visible map in metres. */
+  widthM: number;
+  heightM: number;
+  zoom: number;
 }
 
 /**
@@ -412,6 +424,7 @@ export default function MapView({
   introFlight = false,
   showUserLocation = false,
   chrome = true,
+  onViewportChange,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -424,9 +437,11 @@ export default function MapView({
   const onCellClickRef = useRef(onCellClick);
   const onMapClickRef = useRef(onMapClick);
   const onOverlayStatusRef = useRef(onOverlayStatus);
+  const onViewportChangeRef = useRef(onViewportChange);
   onCellClickRef.current = onCellClick;
   onMapClickRef.current = onMapClick;
   onOverlayStatusRef.current = onOverlayStatus;
+  onViewportChangeRef.current = onViewportChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -471,6 +486,25 @@ export default function MapView({
     map.on("click", (e) => {
       if (onMapClickRef.current) onMapClickRef.current(e.lngLat.lat, e.lngLat.lng);
     });
+
+    // What the viewer is looking at, in metres on the ground - so an action can
+    // say "analyse this" about the visible area instead of asking for numbers.
+    const reportViewport = () => {
+      if (!onViewportChangeRef.current) return;
+      const c = map.getCenter();
+      const b = map.getBounds();
+      const mPerDegLat = 111320;
+      const mPerDegLng = mPerDegLat * Math.cos((c.lat * Math.PI) / 180);
+      onViewportChangeRef.current({
+        centerLat: c.lat,
+        centerLng: c.lng,
+        widthM: Math.abs(b.getEast() - b.getWest()) * mPerDegLng,
+        heightM: Math.abs(b.getNorth() - b.getSouth()) * mPerDegLat,
+        zoom: map.getZoom(),
+      });
+    };
+    map.on("moveend", reportViewport);
+    map.once("idle", reportViewport);
 
     // A container laid out (or resized) after init otherwise leaves the canvas
     // at a stale size and paints blank.

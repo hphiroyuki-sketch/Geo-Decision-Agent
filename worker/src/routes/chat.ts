@@ -199,7 +199,14 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
                     advance(2);
                     const nearby = await findNearbyFieldRecords(c.env.DB, conversation.project_id, cand.lat, cand.lng);
                     override.fieldRecordsCount = nearby.length;
-                    override.confirmedFieldRecordsCount = nearby.filter((n) => n.review_status === "confirmed").length;
+                    // A pin dropped on satellite imagery is a statement about
+                    // which habitat to compare against, not evidence that
+                    // anybody has been there. It seeds the reference vector but
+                    // must never raise the confidence rating, which exists to
+                    // say whether a claim has been checked on the ground.
+                    override.confirmedFieldRecordsCount = nearby.filter(
+                      (n) => n.review_status === "confirmed" && n.source !== "map_pin",
+                    ).length;
                     const species = nearby.map((n) => n.species_guess).filter((s): s is string => !!s);
                     if (species.length) override.fieldSpeciesNames = [...new Set(species)];
 

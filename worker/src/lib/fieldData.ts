@@ -23,6 +23,8 @@ export interface NearbyFieldRecord {
   lng: number;
   species_guess: string | null;
   review_status: string;
+  /** 'field' = somebody stood there; 'map_pin' = designated on imagery. */
+  source: string;
 }
 
 export async function findNearbyFieldRecords(
@@ -36,7 +38,7 @@ export async function findNearbyFieldRecords(
   const degPad = radiusKm / 111; // ~111km per degree latitude
   const { results } = await db
     .prepare(
-      `SELECT lat, lng, species_guess, review_status FROM field_records
+      `SELECT lat, lng, species_guess, review_status, source FROM field_records
        WHERE project_id = ? AND review_status != 'rejected'
          AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`,
     )

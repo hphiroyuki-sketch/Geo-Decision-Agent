@@ -450,11 +450,11 @@ meshRoutes.get("/projects/:id/mesh-context", async (c) => {
   if (!project) return c.json({ error: "プロジェクトが見つかりません。" }, 404);
 
   const { results: confirmed } = await c.env.DB.prepare(
-    `SELECT id, lat, lng, species_guess, demo FROM field_records
+    `SELECT id, lat, lng, species_guess, demo, source FROM field_records
      WHERE project_id = ? AND review_status = 'confirmed' ORDER BY created_at DESC LIMIT 20`,
   )
     .bind(projectId)
-    .all<{ id: string; lat: number; lng: number; species_guess: string | null; demo: number }>();
+    .all<{ id: string; lat: number; lng: number; species_guess: string | null; demo: number; source: string }>();
 
   const { results: unreviewed } = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM field_records WHERE project_id = ? AND review_status = 'unreviewed'`,
@@ -496,6 +496,8 @@ meshRoutes.get("/projects/:id/mesh-context", async (c) => {
     referenceCentroid,
     referenceSpreadM,
     demoRecords: confirmed.filter((r) => r.demo === 1).length,
+    mapPinCount: confirmed.filter((r) => r.source === "map_pin").length,
+    fieldRecordCount: confirmed.filter((r) => r.source !== "map_pin").length,
     year,
     maxCells: MAX_CELLS,
     batchSize: SAMPLE_BATCH,
@@ -575,6 +577,72 @@ meshRoutes.post("/projects/:id/demo-field-records", async (c) => {
   await logAudit(c.env.DB, user.id, "field_records.demo_seed", projectId, { count: DEMO_RECORDS.length });
 
   return c.json({ created: DEMO_RECORDS.length, center: DEMO_SITE });
+});
+
+/**
+ * Reference points placed on the map (V-03 "この表示範囲で解析").
+ *
+ * The similarity score compares each cell against the average of the project's
+ * confirmed records. That made the product unusable from a desk: with no
+ * records there is nothing to compare against, and with records in another
+ * prefecture every cell scores alike and low - which is exactly what a run over
+ * Higashihiroshima against reference points in Gifu produced.
+ *
+ * Pointing at habitat on the satellite image is a legitimate way to say "this
+ * is the environment I care about", and it is what the user can actually do
+ * while looking at the map. It is NOT a field observation, so it is stored with
+ * source = 'map_pin' and labelled that way everywhere it appears; the evidence
+ * counts and the confidence rule continue to require someone to have been there.
+ */
+meshRoutes.post("/projects/:id/reference-pins", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const projectId = c.req.param("id");
+  const body = await c.req.json<{ points?: { lat: number; lng: number }[]; replace?: boolean }>();
+  const points = (body.points ?? []).filter(
+    (p) => typeof p.lat === "number" && typeof p.lng === "number" && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180,
+  );
+  if (points.length === 0) return c.json({ error: "基準地点が指定されていません。" }, 400);
+  if (points.length > 12) return c.json({ error: "基準地点は12点までです。" }, 400);
+
+  if (body.replace !== false) {
+    await c.env.DB.prepare("DELETE FROM field_records WHERE project_id = ? AND source = 'map_pin'")
+      .bind(projectId)
+      .run();
+  }
+
+  const now = new Date().toISOString();
+  await c.env.DB.batch(
+    points.map((p, i) =>
+      c.env.DB.prepare(
+        `INSERT INTO field_records (id, project_id, observer_id, lat, lng, gps_accuracy_m, species_guess,
+           taxon_confidence, notes, captured_at, review_status, created_at, demo, source)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, 'confirmed', ?, 0, 'map_pin')`,
+      ).bind(
+        newId("fld"),
+        projectId,
+        user.id,
+        Number(p.lat.toFixed(6)),
+        Number(p.lng.toFixed(6)),
+        `基準地点 ${i + 1}`,
+        "衛星画像上で指定した基準地点です。現地確認はされていません。",
+        now,
+        now,
+      ),
+    ),
+  );
+
+  await logAudit(c.env.DB, user.id, "reference_pins.set", projectId, { count: points.length });
+  return c.json({ created: points.length });
+});
+
+meshRoutes.delete("/projects/:id/reference-pins", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const projectId = c.req.param("id");
+  const res = await c.env.DB.prepare("DELETE FROM field_records WHERE project_id = ? AND source = 'map_pin'")
+    .bind(projectId)
+    .run();
+  await logAudit(c.env.DB, user.id, "reference_pins.clear", projectId, {});
+  return c.json({ deleted: res.meta?.changes ?? 0 });
 });
 
 meshRoutes.delete("/projects/:id/demo-field-records", async (c) => {
