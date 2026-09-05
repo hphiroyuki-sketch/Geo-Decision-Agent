@@ -255,28 +255,53 @@ function extrusionHeight(mode: MeshHeightMode): maplibregl.DataDrivenPropertyVal
  */
 function whenStyleReady(map: maplibregl.Map, fn: () => void): () => void {
   let done = false;
-  const attempt = () => {
-    if (done) return;
-    if (!map.isStyleLoaded()) return;
-    done = true;
+  let timer = 0;
+
+  const detach = () => {
+    window.clearTimeout(timer);
     map.off("styledata", attempt);
-    map.off("idle", attempt);
+    map.off("style.load", attempt);
+    map.off("load", attempt);
+  };
+
+  function attempt() {
+    if (done) return;
+    // `isStyleLoaded()` was the wrong question. MapLibre only reports the style
+    // as loaded once EVERY source cache has finished, and this map carries ten
+    // raster sources - historical GSI photography that 404s outside its
+    // coverage, Esri imagery, elevation tiles. One source that never settles
+    // holds the whole predicate false forever, and then none of this runs: the
+    // imagery layers keep the `visibility: none` they are declared with, the
+    // street map underneath stays visible, and the mesh layers are never even
+    // created. That is precisely "the map shows roads instead of satellite and
+    // the mesh is missing", with nothing in the console to say so.
+    //
+    // What these callbacks actually need is that the style's layers can be
+    // addressed - which is true as soon as the style object is parsed, long
+    // before any tile arrives. Poll for that rather than trusting an event to
+    // arrive, so a slow or failing tile server cannot silently disable the map.
+    if (!map.getLayer("streets")) {
+      timer = window.setTimeout(attempt, 100);
+      return;
+    }
+    done = true;
+    detach();
     try {
       fn();
     } catch (err) {
       console.error("map update failed", err);
     }
-  };
+  }
 
   attempt();
   if (!done) {
     map.on("styledata", attempt);
-    map.on("idle", attempt);
+    map.on("style.load", attempt);
+    map.on("load", attempt);
   }
   return () => {
     done = true;
-    map.off("styledata", attempt);
-    map.off("idle", attempt);
+    detach();
   };
 }
 

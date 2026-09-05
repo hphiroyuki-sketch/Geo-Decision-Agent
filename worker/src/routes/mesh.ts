@@ -450,11 +450,11 @@ meshRoutes.get("/projects/:id/mesh-context", async (c) => {
   if (!project) return c.json({ error: "プロジェクトが見つかりません。" }, 404);
 
   const { results: confirmed } = await c.env.DB.prepare(
-    `SELECT id, lat, lng, species_guess FROM field_records
+    `SELECT id, lat, lng, species_guess, demo FROM field_records
      WHERE project_id = ? AND review_status = 'confirmed' ORDER BY created_at DESC LIMIT 20`,
   )
     .bind(projectId)
-    .all<{ id: string; lat: number; lng: number; species_guess: string | null }>();
+    .all<{ id: string; lat: number; lng: number; species_guess: string | null; demo: number }>();
 
   const { results: unreviewed } = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM field_records WHERE project_id = ? AND review_status = 'unreviewed'`,
@@ -472,15 +472,119 @@ meshRoutes.get("/projects/:id/mesh-context", async (c) => {
 
   const year = Number(await getSetting(c.env.DB, "earth_engine_year", "2024"));
 
+  // How far apart the reference points actually are. Similarity is measured
+  // against their average, so records taken a few metres apart describe one
+  // spot rather than a habitat - every cell then scores alike and the mesh
+  // comes out a single colour. That failure looks like a broken analysis, so
+  // the number behind it is reported rather than left to be inferred.
+  let referenceSpreadM: number | null = null;
+  if (confirmed.length > 1) {
+    let max = 0;
+    for (let i = 0; i < confirmed.length; i++) {
+      for (let j = i + 1; j < confirmed.length; j++) {
+        const d = haversineM(confirmed[i], confirmed[j]);
+        if (d > max) max = d;
+      }
+    }
+    referenceSpreadM = Math.round(max);
+  }
+
   return c.json({
     project: { name: project.name, centerLat: project.center_lat, centerLng: project.center_lng, areaHa: project.area_ha },
     confirmedRecords: confirmed,
     unreviewedCount: unreviewed[0]?.n ?? 0,
     referenceCentroid,
+    referenceSpreadM,
+    demoRecords: confirmed.filter((r) => r.demo === 1).length,
     year,
     maxCells: MAX_CELLS,
     batchSize: SAMPLE_BATCH,
   });
+});
+
+function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Sample field records, for trying the analysis without going outdoors.
+ *
+ * Placed in real forest (万波高原, Gifu) and spread across roughly 600m, because
+ * both properties matter: the reference has to describe a habitat rather than a
+ * point, and the ground around it has to vary, or every cell scores alike and
+ * the mesh comes out one colour. Records taken in a city block a few metres
+ * apart - the situation this exists to rescue - cannot produce a useful mesh no
+ * matter how many cells are sampled.
+ *
+ * Every row is marked demo = 1 and named so, so it can never be read as an
+ * observation somebody made.
+ */
+const DEMO_SITE = { lat: 36.2871, lng: 137.0332, label: "万波高原（デモ）" };
+
+const DEMO_RECORDS = [
+  { dLat: 0.0026, dLng: -0.0021, species: "ブナ", notes: "尾根筋の落葉広葉樹林。林床にササ。" },
+  { dLat: 0.0011, dLng: 0.0028, species: "ミズナラ", notes: "斜面中腹。樹冠が閉じている。" },
+  { dLat: -0.0019, dLng: 0.0012, species: "スギ", notes: "沢沿いの人工林。下層植生は乏しい。" },
+  { dLat: -0.0024, dLng: -0.0026, species: "ダケカンバ", notes: "高標高側の林縁。" },
+  { dLat: 0.0004, dLng: -0.0004, species: "クマイザサ", notes: "林内の草本層。" },
+  { dLat: -0.0006, dLng: 0.0031, species: "トチノキ", notes: "谷沿いの湿性立地。" },
+];
+
+meshRoutes.post("/projects/:id/demo-field-records", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const projectId = c.req.param("id");
+  const project = await c.env.DB.prepare("SELECT id FROM projects WHERE id = ?").bind(projectId).first();
+  if (!project) return c.json({ error: "プロジェクトが見つかりません。" }, 404);
+
+  await c.env.DB.prepare("DELETE FROM field_records WHERE project_id = ? AND demo = 1").bind(projectId).run();
+
+  const now = new Date().toISOString();
+  const statements = DEMO_RECORDS.map((r) =>
+    c.env.DB.prepare(
+      `INSERT INTO field_records (id, project_id, observer_id, lat, lng, gps_accuracy_m, species_guess,
+         taxon_confidence, notes, captured_at, review_status, created_at, demo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, 1)`,
+    ).bind(
+      newId("fld"),
+      projectId,
+      user.id,
+      Number((DEMO_SITE.lat + r.dLat).toFixed(6)),
+      Number((DEMO_SITE.lng + r.dLng).toFixed(6)),
+      5,
+      `【デモ】${r.species}`,
+      "中",
+      `${r.notes}（動作確認用のサンプルデータです。実際の観察記録ではありません。）`,
+      now,
+      now,
+    ),
+  );
+  await c.env.DB.batch(statements);
+
+  // Point the project at the demo area too, so "プロジェクト中心" and the map
+  // land somewhere the sample data actually describes.
+  await c.env.DB.prepare("UPDATE projects SET center_lat = ?, center_lng = ?, updated_at = ? WHERE id = ?")
+    .bind(DEMO_SITE.lat, DEMO_SITE.lng, now, projectId)
+    .run();
+
+  await logAudit(c.env.DB, user.id, "field_records.demo_seed", projectId, { count: DEMO_RECORDS.length });
+
+  return c.json({ created: DEMO_RECORDS.length, center: DEMO_SITE });
+});
+
+meshRoutes.delete("/projects/:id/demo-field-records", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const projectId = c.req.param("id");
+  const res = await c.env.DB.prepare("DELETE FROM field_records WHERE project_id = ? AND demo = 1")
+    .bind(projectId)
+    .run();
+  await logAudit(c.env.DB, user.id, "field_records.demo_clear", projectId, {});
+  return c.json({ deleted: res.meta?.changes ?? 0 });
 });
 
 /** Distribution of the sampled values, so a mesh that classified nothing can

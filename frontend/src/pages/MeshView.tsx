@@ -15,6 +15,7 @@ import {
   Maximize2,
   Printer,
   Ruler,
+  FlaskConical,
 } from "lucide-react";
 import { api } from "../lib/api";
 import MapView, { type CellProperties, type MapMarker } from "../components/MapView";
@@ -78,9 +79,12 @@ interface MeshDetail {
 
 interface MeshContext {
   project: { name: string; centerLat: number | null; centerLng: number | null; areaHa: number | null };
-  confirmedRecords: { id: string; lat: number; lng: number; species_guess: string | null }[];
+  confirmedRecords: { id: string; lat: number; lng: number; species_guess: string | null; demo: number }[];
   unreviewedCount: number;
   referenceCentroid: { lat: number; lng: number } | null;
+  /** Greatest distance between two confirmed records, in metres. */
+  referenceSpreadM: number | null;
+  demoRecords: number;
   year: number;
   maxCells: number;
 }
@@ -154,6 +158,7 @@ export default function MeshView() {
   const [centerMode, setCenterMode] = useState<"reference" | "project" | "manual">("reference");
   const [manualCenter, setManualCenter] = useState("");
   const [pickOnMap, setPickOnMap] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const cancelRef = useRef(false);
 
   const activeMeshId = searchParams.get("mesh");
@@ -228,21 +233,86 @@ export default function MeshView() {
     ];
   }, [busy, progress, cellCount, cellSizeM, detectChange]);
 
-  const runSampling = async (meshId: string, total: number) => {
+  /**
+   * Samples until the mesh is complete, then derives hotspots from it.
+   *
+   * Two things here are deliberate, both learned from a mesh that sat at
+   * 64 of 400 cells with nothing analysed:
+   *
+   * A single failed batch used to abandon the whole run. Earth Engine can
+   * refuse one request and serve the next perfectly well, so a batch is now
+   * retried before the run gives up.
+   *
+   * And the analysis step now runs whichever way the loop ends. A partly
+   * sampled mesh with hotspots drawn from the cells that did arrive is a
+   * usable result; the same mesh with no analysis reads to the user as
+   * "nothing worked", which is what happened.
+   */
+  const runSampling = async (meshId: string, total: number, alreadySampled = 0) => {
     cancelRef.current = false;
-    let remaining = total;
+    let remaining = total - alreadySampled;
     let guard = 0;
-    while (remaining > 0 && !cancelRef.current && guard < 400) {
-      guard++;
-      const res = await api.post<{ sampled: number; failed: number; remaining: number }>(`/meshes/${meshId}/sample`, {});
-      remaining = res.remaining;
-      setProgress({ done: total - remaining, total });
-      if (res.sampled === 0 && res.failed === 0) break;
+    let consecutiveFailures = 0;
+    let lastError: unknown = null;
+
+    setProgress({ done: alreadySampled, total });
+
+    try {
+      while (remaining > 0 && !cancelRef.current && guard < 600) {
+        guard++;
+        try {
+          const res = await api.post<{ sampled: number; failed: number; remaining: number }>(
+            `/meshes/${meshId}/sample`,
+            {},
+          );
+          remaining = res.remaining;
+          consecutiveFailures = 0;
+          setProgress({ done: total - remaining, total });
+          // Nothing sampled and nothing failed means the batch had no work it
+          // could do; continuing would spin.
+          if (res.sampled === 0 && res.failed === 0) break;
+        } catch (err) {
+          lastError = err;
+          consecutiveFailures++;
+          if (consecutiveFailures >= 3) break;
+          await new Promise((resolve) => setTimeout(resolve, 800 * consecutiveFailures));
+        }
+      }
+    } finally {
+      try {
+        await api.post(`/meshes/${meshId}/analyze`, {});
+      } catch (err) {
+        console.error("mesh analyze failed", err);
+      }
+      await loadDetail(meshId);
+      setProgress(null);
+      setMobileView("map");
     }
-    await api.post(`/meshes/${meshId}/analyze`, {});
-    await loadDetail(meshId);
-    setProgress(null);
-    setMobileView("map");
+
+    if (remaining > 0) {
+      setError(
+        lastError
+          ? `途中で中断しました（残り ${remaining.toLocaleString()} マス）。取得できた分は解析済みです。「続きから再開」で続けられます。理由: ${
+              lastError instanceof Error ? lastError.message : String(lastError)
+            }`
+          : `残り ${remaining.toLocaleString()} マスを取得できませんでした。取得できた分は解析済みです。「続きから再開」をお試しください。`,
+      );
+    }
+  };
+
+  /** Picks a part-finished mesh back up rather than starting a new one. */
+  const resumeSampling = async () => {
+    if (!detail) return;
+    const sampled = stats?.stats?.sampled ?? 0;
+    const total = sampled + detail.pending;
+    if (detail.pending === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await runSampling(detail.mesh.id, total, sampled);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const createMesh = async () => {
@@ -266,6 +336,38 @@ export default function MeshView() {
       setProgress(null);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const reloadContext = async () => {
+    if (!id) return;
+    setContext(await api.get<MeshContext>(`/projects/${id}/mesh-context`));
+  };
+
+  const seedDemoRecords = async () => {
+    if (!id) return;
+    setDemoBusy(true);
+    setError(null);
+    try {
+      await api.post(`/projects/${id}/demo-field-records`, {});
+      await reloadContext();
+      setCenterMode("reference");
+      setExtentM(400);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDemoBusy(false);
+    }
+  };
+
+  const clearDemoRecords = async () => {
+    if (!id) return;
+    setDemoBusy(true);
+    try {
+      await api.del(`/projects/${id}/demo-field-records`);
+      await reloadContext();
+    } finally {
+      setDemoBusy(false);
     }
   };
 
@@ -522,6 +624,23 @@ export default function MeshView() {
             </Hint>
           )}
 
+          {/* The failure this screen kept producing: every confirmed record in one
+              spot. Similarity is measured against their average, so a reference
+              that describes a point rather than a habitat makes every cell score
+              alike, and the mesh comes out a single colour. Say it with the
+              number, and offer the way out. */}
+          {context && context.confirmedRecords.length > 1 && (context.referenceSpreadM ?? 0) < 100 && (
+            <Hint tone="warn">
+              <strong>
+                現地記録 {context.confirmedRecords.length} 件が、すべて約 {context.referenceSpreadM}m
+                以内に集中しています。
+              </strong>
+              類似度は「確認済み記録の平均」との比較なので、記録が1か所に固まっていると
+              <strong>どのマスも同じ判定になり、色分けが1色になります</strong>
+              。性質の異なる複数の場所（尾根・沢沿い・林縁など）で記録すると差が出ます。
+            </Hint>
+          )}
+
           {referenceDistanceKm !== null && referenceDistanceKm <= 0.3 && (
             <Hint tone="info">
               基準地点までの距離が約 {(referenceDistanceKm * 1000).toFixed(0)}m と近いため、類似度が高く出ます。
@@ -530,6 +649,55 @@ export default function MeshView() {
               離れた複数地点に現地記録があると、判定の信頼性が上がります。
             </Hint>
           )}
+
+          {/* Trying the analysis without going outdoors. Marked, explained and
+              removable - a fabricated record that read as 現地確認済み would
+              overstate the evidence behind a siting decision. */}
+          <div className="rounded-lg border border-[var(--gda-ink-line)] bg-black/25 p-2.5">
+            {context && context.demoRecords > 0 ? (
+              <>
+                <div className="text-[11px] leading-snug">
+                  <span className="inline-block rounded bg-sky-500/20 text-sky-300 border border-sky-500/40 px-1.5 py-0.5 text-[9.5px] mr-1.5">
+                    デモデータ
+                  </span>
+                  サンプルの現地記録 {context.demoRecords} 件を使用中です（万波高原・岐阜）。
+                  実際の観察記録ではないため、レポートに使う前に削除してください。
+                </div>
+                <button
+                  onClick={clearDemoRecords}
+                  disabled={demoBusy}
+                  className="mt-2 w-full text-[11px] border border-[var(--gda-ink-line)] rounded-lg py-1.5 disabled:opacity-40"
+                >
+                  {demoBusy ? "削除中..." : "デモデータを削除する"}
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-[11px] text-[var(--gda-ink-muted)] leading-snug">
+                  <FlaskConical size={11} className="inline mr-1 -mt-0.5" />
+                  現地に出られないときは、実在の森林（万波高原・岐阜）に約600m四方で散らした
+                  サンプルの現地記録6件を作成して、解析の動きを確認できます。
+                  <span className="text-[var(--gda-ink-text)]">
+                    サンプルであることが記録・画面の両方に明示され、いつでも削除できます。
+                  </span>
+                  {context && context.confirmedRecords.length > 0 && (
+                    <span className="block mt-1 text-amber-300">
+                      このプロジェクトには確認済みの記録が既に {context.confirmedRecords.length}{" "}
+                      件あります。類似度はすべての記録の平均と比較するため、離れた場所の記録が混ざると判定が意味を失います。
+                      デモを試す場合は、新しいプロジェクトを作ってそちらで実行してください。
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={seedDemoRecords}
+                  disabled={demoBusy}
+                  className="mt-2 w-full text-[11px] font-medium bg-white/10 hover:bg-white/15 border border-[var(--gda-ink-line)] rounded-lg py-1.5 disabled:opacity-40"
+                >
+                  {demoBusy ? "作成中..." : "デモ用の現地記録を作成して試す"}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="p-4 space-y-3 border-b border-[var(--gda-ink-line)]">
@@ -608,6 +776,22 @@ export default function MeshView() {
           <div className="p-4 border-b border-[var(--gda-ink-line)]">
             <div className="text-xs font-semibold mb-2">3. 結果</div>
 
+            {detail.pending > 0 && !busy && (
+              <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+                <div className="text-[11px] text-amber-200 leading-snug">
+                  <strong>この解析は途中で止まっています。</strong>
+                  {detail.pending.toLocaleString()} マスが未取得です。下の結果は取得済みの
+                  {(stats?.stats?.sampled ?? 0).toLocaleString()} マスから算出しています。
+                </div>
+                <button
+                  onClick={resumeSampling}
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg"
+                >
+                  <Play size={13} /> 続きから再開（残り {detail.pending.toLocaleString()} マス）
+                </button>
+              </div>
+            )}
+
             {stats?.stats && (
               <div className="text-[11px] space-y-1 bg-black/25 rounded-lg p-2.5 mb-3">
                 <div className="flex justify-between">
@@ -665,17 +849,32 @@ export default function MeshView() {
             {noHotspots && (
               <Hint tone="info">
                 <strong>重要区域として抽出された場所はありませんでした。</strong>
-                {simMax !== null && stats && (
+                {/* Only say the threshold was missed when it actually was. The
+                    previous wording said "0.98 does not reach 0.85", which is
+                    both false and the opposite of what the data showed. */}
+                {simMax !== null && stats && simMax < stats.thresholds.priorityA ? (
                   <>
                     {" "}
                     類似度の最大値は {simMax.toFixed(2)} で、保全優先の判定基準 {stats.thresholds.priorityA}{" "}
                     に届いていません。
+                    {referenceDistanceKm !== null && referenceDistanceKm > 5 ? (
+                      <>
+                        {" "}
+                        基準地点が約{referenceDistanceKm.toFixed(0)}
+                        km離れているためです。近くで現地記録を取り直すと結果が変わります。
+                      </>
+                    ) : (
+                      <> 「類似度で色分け」に切り替えると、しきい値に届かない範囲の濃淡も確認できます。</>
+                    )}
                   </>
-                )}
-                {referenceDistanceKm !== null && referenceDistanceKm > 5 ? (
-                  <> 基準地点が約{referenceDistanceKm.toFixed(0)}km離れているためです。近くで現地記録を取り直すと結果が変わります。</>
+                ) : detail.pending > 0 ? (
+                  <> 解析が途中で止まっているためです。上の「続きから再開」で最後まで取得すると区域が抽出されます。</>
                 ) : (
-                  <> 「類似度で色分け」に切り替えると、しきい値に届かない範囲の濃淡も確認できます。</>
+                  <>
+                    {" "}
+                    しきい値には達していますが、同じ判定のマスが3つ以上まとまった区域がありません。
+                    判定がばらけている場合は、解析範囲を広げると連続した区域として抽出されます。
+                  </>
                 )}
               </Hint>
             )}
