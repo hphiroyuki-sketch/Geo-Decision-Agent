@@ -17,6 +17,7 @@
 
 import type { Env } from "../types";
 import { CELL_CLASS_LABEL, PRIORITY_A_THRESHOLD, CHANGED_THRESHOLD, type CellClass } from "./mesh";
+import { PUBLIC_DATA_SOURCES, type PublicDataBundle } from "./publicData";
 
 export type LeapPhase = "scoping" | "locate" | "evaluate" | "assess" | "prepare";
 
@@ -97,8 +98,23 @@ export interface SensitiveCriterion {
   key: string;
   title: string;
   assessable: boolean;
+  /** A proxy indicator is neither an assessment nor an absence of one. */
+  proxy?: boolean;
   result: string;
   requires?: string;
+  /** Named next to the figure, so a reader can defend it in a meeting. */
+  source?: string;
+  fetchedAt?: string | null;
+}
+
+export interface PublicDataStatus {
+  key: string;
+  label: string;
+  covers: string;
+  caveat: string;
+  status: "ok" | "failed" | "not_fetched";
+  error?: string;
+  fetchedAt?: string | null;
 }
 
 interface ProjectRow {
@@ -257,6 +273,49 @@ export async function buildLeapReport(env: Env, projectId: string) {
       executed_at: string;
     }>();
 
+  // Public datasets are fetched on demand and cached; the report reads what is
+  // there rather than calling out on every view.
+  const screenPoint =
+    mesh?.center_lat != null
+      ? { lat: mesh.center_lat, lng: mesh.center_lng }
+      : project.center_lat != null && project.center_lng != null
+        ? { lat: project.center_lat, lng: project.center_lng }
+        : null;
+
+  const publicRows = screenPoint
+    ? (
+        await env.DB.prepare(
+          `SELECT source, payload_json, status, error, fetched_at FROM public_data_cache
+           WHERE lat = ? AND lng = ?`,
+        )
+          .bind(Math.round(screenPoint.lat * 1000) / 1000, Math.round(screenPoint.lng * 1000) / 1000)
+          .all<{ source: string; payload_json: string | null; status: string; error: string | null; fetched_at: string }>()
+      ).results
+    : [];
+
+  const publicOf = (source: string) => publicRows.find((r) => r.source === source);
+  const parsed = <T>(source: string): T | null => {
+    const row = publicOf(source);
+    return row?.payload_json && row.status === "ok" ? (JSON.parse(row.payload_json) as T) : null;
+  };
+
+  const bio = parsed<PublicDataBundle["biodiversity"]["data"]>("gbif");
+  const pa = parsed<PublicDataBundle["protectedAreas"]["data"]>("osm_protected");
+  const hz = parsed<PublicDataBundle["hazards"]["data"]>("gsi_hazard");
+
+  const publicData: PublicDataStatus[] = PUBLIC_DATA_SOURCES.map((src) => {
+    const row = publicOf(src.key);
+    return {
+      key: src.key,
+      label: src.label,
+      covers: src.covers,
+      caveat: src.caveat,
+      status: !row ? ("not_fetched" as const) : row.status === "ok" ? ("ok" as const) : ("failed" as const),
+      error: row?.error ?? undefined,
+      fetchedAt: row?.fetched_at ?? null,
+    };
+  });
+
   const countBy = (status: string, source?: string) =>
     fieldStats
       .filter((f) => f.review_status === status && (source ? f.source === source : true))
@@ -316,10 +375,31 @@ export async function buildLeapReport(env: Env, projectId: string) {
     {
       key: "biodiversity_importance",
       title: "生物多様性にとって重要な地域",
-      assessable: false,
-      result: "判定不可",
-      requires:
-        "保護区域・KBA（生物多様性重要地域）・自然共生サイト等の公的指定データとの照合が必要です。本システムには未接続です。",
+      assessable: Boolean(bio || pa),
+      result: (() => {
+        if (!bio && !pa) return "判定不可（公的データ未取得）";
+        const parts: string[] = [];
+        if (bio) {
+          parts.push(
+            bio.threatened.length > 0
+              ? `該当の可能性あり：半径${bio.radiusKm}km以内に絶滅危惧種の記録 ${bio.threatenedRecords}件（${bio.threatened.map((t) => t.label).join("・")}）`
+              : `半径${bio.radiusKm}km以内に絶滅危惧種（CR/EN/VU）の記録なし（総記録 ${bio.totalRecords.toLocaleString()}件）`,
+          );
+        }
+        if (pa) {
+          parts.push(
+            pa.nearest
+              ? `最寄りの保護区域まで ${pa.nearest.distanceKm}km（${pa.nearest.name}／${pa.nearest.kind}）`
+              : `半径${pa.radiusKm}km以内に保護区域の登録なし`,
+          );
+        }
+        return parts.join("／");
+      })(),
+      requires: !bio && !pa
+        ? "「公的データと照合」を実行すると、GBIFの生物記録とOpenStreetMapの保護区域から判定します。"
+        : "GBIFは観察記録の集積であり、記録が無いことは生息していないことを意味しません。保護区域はOpenStreetMap由来の参考値です。正式な指定はKBA・自然共生サイト・国立公園等の所管データでご確認ください。",
+      source: [bio ? "GBIF" : null, pa ? "OpenStreetMap" : null].filter(Boolean).join(" / ") || undefined,
+      fetchedAt: publicOf("gbif")?.fetched_at ?? publicOf("osm_protected")?.fetched_at ?? null,
     },
     {
       key: "high_integrity",
@@ -335,6 +415,11 @@ export async function buildLeapReport(env: Env, projectId: string) {
         hasMeshResult && (mesh?.reference_points ?? 0) > 0
           ? "本判定は基準地点との相対的な類似度によるものです。絶対的な生態系完全性指標（例：Biodiversity Intactness Index）との照合は未実施です。"
           : "基準地点の設定と10mメッシュ解析が必要です。",
+      source:
+        hasMeshResult && (mesh?.reference_points ?? 0) > 0
+          ? "自システムの10mメッシュ解析（Google Satellite Embedding V1 Annual）"
+          : undefined,
+      fetchedAt: mesh?.completed_at ?? null,
     },
     {
       key: "rapid_decline",
@@ -350,22 +435,48 @@ export async function buildLeapReport(env: Env, projectId: string) {
         hasMeshResult && mesh?.detect_change === 1
           ? "前年比1年分の比較です。長期傾向の判定には複数年の解析が必要です。変化の原因は衛星では特定できません。"
           : "「前年との変化も調べる」を有効にした10mメッシュ解析が必要です。",
+      source:
+        hasMeshResult && mesh?.detect_change === 1
+          ? "自システムの10mメッシュ解析（Google Satellite Embedding V1 Annual）"
+          : undefined,
+      fetchedAt: mesh?.completed_at ?? null,
     },
     {
       key: "water_risk",
       title: "物理的な水リスクが高い地域",
-      assessable: false,
-      result: "判定不可",
-      requires:
-        "流域界・取水量・渇水/洪水リスクの公的データ（例：WRI Aqueduct、国土数値情報）との照合が必要です。本システムには未接続です。",
+      assessable: Boolean(hz),
+      result: (() => {
+        if (!hz) return "判定不可（公的データ未取得）";
+        const hit = hz.layers.filter((l) => l.group === "water" && l.present === true);
+        return hit.length > 0
+          ? `該当あり：${hit.map((l) => l.label).join("・")}（周辺約${hz.tileSpanM}m四方の範囲内）`
+          : `該当なし：洪水・高潮・津波の想定区域は検出されず（周辺約${hz.tileSpanM}m四方）`;
+      })(),
+      requires: !hz
+        ? "「公的データと照合」を実行すると、国土地理院ハザードマップポータルの配信タイルから判定します。"
+        : `判定はタイル単位（約${hz.tileSpanM}m四方）での該当有無です。地点そのものが区域内にあるかは「重ねるハザードマップ」でご確認ください。渇水・取水制限等の水ストレスは本判定に含みません。`,
+      source: hz ? "国土地理院 ハザードマップポータルサイト" : undefined,
+      fetchedAt: publicOf("gsi_hazard")?.fetched_at ?? null,
     },
     {
       key: "ecosystem_services",
       title: "生態系サービス供給上、重要な地域",
+      // Deliberately never "assessed". No authoritative nationwide dataset of
+      // ecosystem service provision is published as an open API, so what is
+      // offered here is a derived indicator - and labelling a proxy as an
+      // assessment is exactly the overstatement this report exists to avoid.
       assessable: false,
-      result: "判定不可",
+      proxy: Boolean(hz && hasMeshResult),
+      result:
+        hz && hasMeshResult
+          ? `参考指標：${hz.landslidePresent ? "周辺に土砂災害警戒区域があり、" : ""}植生の状態は類似度 ${meshStats?.sim_min?.toFixed(2) ?? "—"}〜${meshStats?.sim_max?.toFixed(2) ?? "—"} の範囲。${hz.landslidePresent ? "当該植生が土砂流出防備の機能を担っている可能性があります。" : "土砂災害警戒区域は周辺に検出されていません。"}`
+          : "判定不可",
       requires:
-        "水源涵養・土壌保持・受粉等のサービス評価が必要です。本システムは影響側の面的変化のみを扱い、依存側の評価は対象外です。",
+        hz && hasMeshResult
+          ? "これは代理指標であり、生態系サービスの評価ではありません。水源涵養・土壌保持・受粉等の定量評価には、保安林指定等の個別データと専門家評価が必要です。"
+          : "水源涵養・土壌保持・受粉等のサービス評価が必要です。全国規模のオープンAPIとして提供されている権威データセットは存在しません。",
+      source: hz && hasMeshResult ? "国土地理院ハザードマップ ＋ 自システムの植生解析（代理指標）" : undefined,
+      fetchedAt: publicOf("gsi_hazard")?.fetched_at ?? null,
     },
   ];
 
@@ -881,6 +992,8 @@ export async function buildLeapReport(env: Env, projectId: string) {
     meshComplete,
     sites,
     sensitive,
+    publicData,
+    screenPoint,
     components,
     coverageSummary: {
       covered: coverageCount("covered"),

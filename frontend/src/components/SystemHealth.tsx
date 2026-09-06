@@ -29,6 +29,18 @@ const CHECK_LABEL: Record<string, { label: string; why: string }> = {
     label: "Earth Engine 関数一覧",
     why: "クエリの関数名が正しいかを照合するための参照情報です（手動実行時のみ取得）。",
   },
+  gbif: {
+    label: "GBIF 生物記録の取得",
+    why: "スクリーニング報告の「生物多様性にとって重要な地域」の判定に使います。",
+  },
+  gsi_hazard: {
+    label: "国土地理院 ハザードマップ配信",
+    why: "「物理的な水リスクが高い地域」の判定に使います。HTTPステータスで該当有無を判定します。",
+  },
+  osm_protected: {
+    label: "OpenStreetMap 保護区域の取得",
+    why: "最寄りの保護区域までの距離を求めます。参考値であり、正式な指定ではありません。",
+  },
 };
 
 /**

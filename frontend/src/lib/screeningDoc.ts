@@ -62,12 +62,30 @@ export function screeningToMarkdown(r: LeapReport): string {
   L.push("");
   L.push("TNFDが定める5つの特性について、本システムで判定できたものと、公的データ未接続により判定していないものを区別して示します。");
   L.push("");
-  L.push("| 基準 | 判定可否 | 結果 | 備考 |");
-  L.push("|---|---|---|---|");
+  L.push("| 基準 | 判定可否 | 結果 | 出典 | 備考 |");
+  L.push("|---|---|---|---|---|");
   for (const s of r.sensitive) {
+    const verdict = s.assessable ? "判定済" : s.proxy ? "代理指標" : "**判定不可**";
+    const src = s.source ? `${s.source}${s.fetchedAt ? `（取得 ${new Date(s.fetchedAt).toLocaleString("ja-JP")}）` : ""}` : "—";
     L.push(
-      `| ${s.title} | ${s.assessable ? "判定済" : "**判定不可**"} | ${s.result} | ${(s.requires ?? "").replace(/\|/g, "／")} |`,
+      `| ${s.title} | ${verdict} | ${s.result.replace(/\|/g, "／")} | ${src} | ${(s.requires ?? "").replace(/\|/g, "／")} |`,
     );
+  }
+  L.push("");
+  L.push("**判定可否の意味**");
+  L.push("");
+  L.push("- **判定済**：公的データに照会し、結果を得た項目です。");
+  L.push("- **代理指標**：直接の権威データが存在しないため、他のデータから推し量った参考値です。判定ではありません。");
+  L.push("- **判定不可**：該当しないという意味ではありません。データを取得していない、または取得に失敗したため、判定を行っていないという意味です。");
+  L.push("");
+
+  L.push("### 参照した公的データ");
+  L.push("");
+  L.push("| データ源 | 取得範囲 | 取得状況 | 留意点 |");
+  L.push("|---|---|---|---|");
+  for (const p of r.publicData) {
+    const st = p.status === "ok" ? `取得成功${p.fetchedAt ? `（${new Date(p.fetchedAt).toLocaleString("ja-JP")}）` : ""}` : p.status === "failed" ? `**取得失敗**${p.error ? `（${p.error}）` : ""}` : "未取得";
+    L.push(`| ${p.label} | ${p.covers.replace(/\|/g, "／")} | ${st} | ${p.caveat.replace(/\|/g, "／")} |`);
   }
   L.push("");
 
@@ -118,7 +136,15 @@ export function screeningToMarkdown(r: LeapReport): string {
   L.push("");
   L.push("- 本書は一次スクリーニングであり、環境影響評価法に基づく法定アセスメントの代替ではありません。");
   L.push("- 衛星データは変化の**有無**を示しますが、**原因**（伐採・災害・病虫害・季節差）は判定できません。原因の特定には現地確認が必要です。");
-  L.push("- 感度の高い地域5基準のうち3基準（生物多様性重要地域・水リスク・生態系サービス）は公的データ未接続のため判定していません。");
+  L.push(
+    "- 保護区域の情報はOpenStreetMap由来の参考値です。正式な指定範囲は所管行政庁でご確認ください。",
+  );
+  L.push(
+    "- ハザードマップの判定はタイル単位（約600m四方）での該当有無であり、地点そのものが区域内にあるかを示すものではありません。",
+  );
+  L.push(
+    "- 生態系サービス供給上の重要性は、全国規模の権威データが存在しないため代理指標にとどめています。",
+  );
   L.push("- 生態系サービスへの依存の評価、および重要性（materiality）の判定は本システムの対象外です。");
   L.push("- 本書の内容は、社内の確認者による承認と専門家レビューを経てから開示にご利用ください。");
   L.push("");

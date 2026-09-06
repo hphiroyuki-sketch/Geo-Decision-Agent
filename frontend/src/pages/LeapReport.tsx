@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Printer, FileDown, Building2, AlertTriangle, Check, Minus, X, ChevronLeft } from "lucide-react";
+import {
+  Printer,
+  FileDown,
+  Building2,
+  AlertTriangle,
+  Check,
+  Minus,
+  X,
+  ChevronLeft,
+  Database,
+  RefreshCw,
+  Loader2,
+  ExternalLink,
+} from "lucide-react";
 import { api } from "../lib/api";
 import {
   BASIS_LABEL,
@@ -11,6 +24,7 @@ import {
   type LeapComponent,
   type LeapPhase,
   type LeapReport as Report,
+  type PublicDataStatus,
   type SiteVerdict,
 } from "../lib/leapTypes";
 import { screeningToMarkdown } from "../lib/screeningDoc";
@@ -49,6 +63,9 @@ export default function LeapReport() {
   const [error, setError] = useState<string | null>(null);
   const [clientName, setClientName] = useState("");
   const [savingClient, setSavingClient] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkStep, setCheckStep] = useState<string | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -70,6 +87,37 @@ export default function LeapReport() {
       setReport(r);
     } finally {
       setSavingClient(false);
+    }
+  };
+
+  /**
+   * Consults the three public datasets and reloads the report.
+   *
+   * The staged label is not decoration: this reaches three external services
+   * and Overpass in particular can take twenty seconds, so a bare spinner would
+   * read as a hang. Naming the source being queried also tells the user what
+   * to expect in the result.
+   */
+  const runPublicDataCheck = async (force = false) => {
+    if (!id) return;
+    setChecking(true);
+    setCheckError(null);
+    const labels = ["GBIF（生物種の記録）に照会中", "OpenStreetMap（保護区域）に照会中", "国土地理院（ハザードマップ）に照会中"];
+    let i = 0;
+    setCheckStep(labels[0]);
+    const ticker = setInterval(() => {
+      i = (i + 1) % labels.length;
+      setCheckStep(labels[i]);
+    }, 2500);
+    try {
+      await api.post(`/projects/${id}/public-data${force ? "?force=1" : ""}`, {});
+      setReport(await api.get<Report>(`/projects/${id}/leap`));
+    } catch (e) {
+      setCheckError(e instanceof Error ? e.message : String(e));
+    } finally {
+      clearInterval(ticker);
+      setCheckStep(null);
+      setChecking(false);
     }
   };
 
@@ -336,31 +384,53 @@ export default function LeapReport() {
             TNFD は優先地域を「重要地域」と「感度の高い地域」で定義し、後者を5つの特性で判定します。
             本システムで判定できたものと、公的データ未接続により<strong>判定していない</strong>ものを区別して示します。
           </p>
-          <table className="w-full text-[11px] border-collapse">
+          <PublicDataPanel
+            sources={r.publicData}
+            point={r.screenPoint}
+            checking={checking}
+            step={checkStep}
+            error={checkError}
+            onRun={runPublicDataCheck}
+          />
+
+          <table className="w-full text-[11px] border-collapse mt-4">
             <thead>
               <tr className="bg-slate-100">
                 <Th>基準</Th>
                 <Th className="w-20">判定可否</Th>
-                <Th>結果・備考</Th>
+                <Th>結果・出典</Th>
               </tr>
             </thead>
             <tbody>
               {r.sensitive.map((s) => (
-                <tr key={s.key} className="border-b border-slate-200 align-top">
+                <tr key={s.key} className="border-b border-slate-200 align-top break-inside-avoid">
                   <Td className="font-medium">{s.title}</Td>
                   <Td>
                     <span
-                      className={`inline-block text-[10px] border rounded px-1.5 py-0.5 ${
+                      className={`inline-block text-[10px] border rounded px-1.5 py-0.5 whitespace-nowrap ${
                         s.assessable
                           ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                          : "bg-slate-100 text-slate-600 border-slate-300"
+                          : s.proxy
+                            ? "bg-sky-50 text-sky-800 border-sky-300"
+                            : "bg-slate-100 text-slate-600 border-slate-300"
                       }`}
                     >
-                      {s.assessable ? "判定済" : "判定不可"}
+                      {s.assessable ? "判定済" : s.proxy ? "代理指標" : "判定不可"}
                     </span>
                   </Td>
                   <Td>
-                    <div className={s.assessable ? "font-medium" : "text-slate-500"}>{s.result}</div>
+                    <div className={s.assessable ? "font-medium" : "text-slate-600"}>{s.result}</div>
+                    {/* Source next to the figure: the question a client asks in
+                        the room is "what data is that", and the answer has to
+                        be on the same line, not in a footnote. */}
+                    {s.source && (
+                      <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-2">
+                        <span className="inline-flex items-center gap-1">
+                          <Database size={9} /> 出典: {s.source}
+                        </span>
+                        {s.fetchedAt && <span>取得: {new Date(s.fetchedAt).toLocaleString("ja-JP")}</span>}
+                      </div>
+                    )}
                     {s.requires && <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">{s.requires}</div>}
                   </Td>
                 </tr>
@@ -368,13 +438,21 @@ export default function LeapReport() {
             </tbody>
           </table>
 
-          <div className="mt-4 border border-slate-300 bg-slate-50 rounded-lg p-3">
+          <div className="mt-4 border border-slate-300 bg-slate-50 rounded-lg p-3 break-inside-avoid">
             <div className="text-[11px] font-semibold mb-1">この表の読み方</div>
-            <p className="text-[11px] text-slate-700 leading-relaxed">
-              「判定不可」は<strong>該当しないという意味ではありません</strong>。
-              判定に必要な公的データが本システムに接続されていないため、判定を行っていないという意味です。
-              開示や立地判断に用いる際は、これらの基準について別途照合が必要です。
-            </p>
+            <ul className="text-[11px] text-slate-700 leading-relaxed space-y-1 list-disc list-inside">
+              <li>
+                <strong>判定済</strong>：公的データに照会し、結果を得た項目です。出典と取得日時を併記しています。
+              </li>
+              <li>
+                <strong>代理指標</strong>：直接の権威データが存在しないため、他のデータから推し量った参考値です。
+                <strong>判定ではありません。</strong>
+              </li>
+              <li>
+                <strong>判定不可</strong>は<strong>該当しないという意味ではありません</strong>。
+                データを取得していない、または取得に失敗したため、判定を行っていないという意味です。
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -557,6 +635,132 @@ function ComponentBlock({ c }: { c: LeapComponent }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The public-data check: one action, honest about each source.
+ *
+ * Three separate services back three different criteria, and they fail
+ * independently. A single "checked" tick would hide the case where two
+ * succeeded and one timed out - and a report that shows "該当なし" for a source
+ * it never reached is the failure mode this whole panel exists to prevent.
+ * So each source shows its own state, its own coverage, and its own caveat.
+ */
+function PublicDataPanel({
+  sources,
+  point,
+  checking,
+  step,
+  error,
+  onRun,
+}: {
+  sources: PublicDataStatus[];
+  point: { lat: number; lng: number } | null;
+  checking: boolean;
+  step: string | null;
+  error: string | null;
+  onRun: (force?: boolean) => void;
+}) {
+  const fetched = sources.filter((s) => s.status === "ok").length;
+  const failed = sources.filter((s) => s.status === "failed").length;
+  const none = sources.every((s) => s.status === "not_fetched");
+
+  return (
+    <div
+      className={`rounded-lg border mb-4 break-inside-avoid ${
+        none ? "border-[var(--gda-green)] bg-emerald-50/40" : "border-slate-300"
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 border-b border-slate-200">
+        <Database size={14} className="text-slate-500 shrink-0" />
+        <div className="text-[12px] font-semibold">公的データとの照合</div>
+        {!none && (
+          <span className="text-[10px] text-slate-500">
+            {fetched}/{sources.length} 件取得
+            {failed > 0 && <span className="text-rose-600 font-medium"> ・{failed}件失敗</span>}
+          </span>
+        )}
+        <button
+          onClick={() => onRun(!none)}
+          disabled={checking || !point}
+          className={`print-hide ml-auto flex items-center gap-1.5 text-[11px] font-medium rounded-lg px-3 py-1.5 disabled:opacity-50 ${
+            none
+              ? "bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] text-white"
+              : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          {checking ? <Loader2 size={12} className="animate-spin" /> : none ? <Database size={12} /> : <RefreshCw size={12} />}
+          {checking ? "照会中..." : none ? "公的データと照合する" : "再取得"}
+        </button>
+      </div>
+
+      {none && !checking && (
+        <p className="px-3 py-2 text-[11px] text-slate-700 leading-relaxed">
+          国の公開データと照合すると、下表の「生物多様性にとって重要な地域」「物理的な水リスクが高い地域」を
+          <strong>判定済</strong>にできます。所要 10〜30 秒です。
+          {!point && <span className="text-rose-600 font-medium">（対象地の座標が未設定のため実行できません）</span>}
+        </p>
+      )}
+
+      {checking && step && (
+        <div className="px-3 py-2 text-[11px] text-slate-600 flex items-center gap-2">
+          <Loader2 size={12} className="animate-spin shrink-0" />
+          {step}
+          <span className="text-slate-400">（OpenStreetMapは混雑時に20秒ほどかかります）</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="px-3 py-2 text-[11px] text-rose-700 bg-rose-50 border-t border-rose-200">{error}</div>
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {sources.map((s) => (
+          <div key={s.key} className="px-3 py-2 flex items-start gap-2.5">
+            <span
+              className={`text-[9.5px] border rounded px-1.5 py-0.5 shrink-0 mt-0.5 whitespace-nowrap ${
+                s.status === "ok"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                  : s.status === "failed"
+                    ? "bg-rose-50 text-rose-800 border-rose-300"
+                    : "bg-slate-100 text-slate-500 border-slate-300"
+              }`}
+            >
+              {s.status === "ok" ? "取得成功" : s.status === "failed" ? "取得失敗" : "未取得"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium">{s.label}</div>
+              <div className="text-[10px] text-slate-500 leading-snug">{s.covers}</div>
+              <div className="text-[10px] text-slate-500 leading-snug mt-0.5">※ {s.caveat}</div>
+              {s.status === "failed" && s.error && (
+                <div className="text-[10px] text-rose-700 mt-0.5">取得できませんでした（{s.error}）。再取得をお試しください。</div>
+              )}
+            </div>
+            {s.fetchedAt && (
+              <div className="text-[9.5px] text-slate-400 shrink-0 text-right leading-tight">
+                {new Date(s.fetchedAt).toLocaleDateString("ja-JP")}
+                <br />
+                {new Date(s.fetchedAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="print-hide px-3 py-2 border-t border-slate-200 text-[10px] text-slate-500">
+        判定はいずれも一次スクリーニングです。正式な指定範囲は
+        <a
+          href="https://disaportal.gsi.go.jp/maps/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[var(--gda-green)] underline mx-1 inline-flex items-center gap-0.5"
+        >
+          重ねるハザードマップ <ExternalLink size={9} />
+        </a>
+        や所管行政庁の公表資料でご確認ください。
+      </div>
     </div>
   );
 }

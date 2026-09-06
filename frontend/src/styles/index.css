@@ -172,6 +172,12 @@ input[type="range"]::-webkit-slider-thumb {
     height: auto !important;
     padding-bottom: 0 !important;
   }
+  /* Tailwind's break-inside utility needs the print-specific property too for
+     table rows and cards to stay whole across a page boundary. */
+  .break-inside-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
   html, body, #root {
     height: auto !important;
     background: #fff !important;

@@ -18,6 +18,7 @@ import {
 } from "../lib/mesh";
 import { buildRecoveryPlan } from "../lib/recoveryPlan";
 import { buildLeapReport } from "../lib/leap";
+import { fetchPublicData, PUBLIC_DATA_SOURCES } from "../lib/publicData";
 
 type AppEnv = { Bindings: Env; Variables: { user: AuthUser | null } };
 
@@ -691,6 +692,55 @@ meshRoutes.get("/meshes/:meshId/stats", async (c) => {
       similar: SIMILAR_THRESHOLD,
       changed: CHANGED_THRESHOLD,
     },
+  });
+});
+
+/**
+ * Consults the public datasets for this project's screening point.
+ *
+ * Explicit rather than automatic on report load: it reaches three external
+ * services, and a document that silently re-queries a shared community API
+ * every time somebody scrolls past it is a bad citizen. Cached afterwards.
+ */
+meshRoutes.post("/projects/:id/public-data", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const projectId = c.req.param("id");
+
+  const mesh = await c.env.DB.prepare(
+    "SELECT center_lat, center_lng FROM meshes WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+  )
+    .bind(projectId)
+    .first<{ center_lat: number; center_lng: number }>();
+  const project = await c.env.DB.prepare("SELECT center_lat, center_lng FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ center_lat: number | null; center_lng: number | null }>();
+
+  const lat = mesh?.center_lat ?? project?.center_lat ?? null;
+  const lng = mesh?.center_lng ?? project?.center_lng ?? null;
+  if (lat == null || lng == null) {
+    return c.json({ error: "対象地の座標が未設定です。先に対象地を指定してください。" }, 400);
+  }
+
+  const force = c.req.query("force") === "1";
+  if (force) {
+    await c.env.DB.prepare("DELETE FROM public_data_cache WHERE lat = ? AND lng = ?")
+      .bind(Math.round(lat * 1000) / 1000, Math.round(lng * 1000) / 1000)
+      .run();
+  }
+
+  const bundle = await fetchPublicData(c.env, lat, lng);
+  await logAudit(c.env.DB, user.id, "public_data.fetch", projectId, {
+    gbif: bundle.biodiversity.status,
+    osm: bundle.protectedAreas.status,
+    gsi: bundle.hazards.status,
+  });
+
+  return c.json({
+    point: { lat, lng },
+    sources: PUBLIC_DATA_SOURCES,
+    biodiversity: bundle.biodiversity,
+    protectedAreas: bundle.protectedAreas,
+    hazards: bundle.hazards,
   });
 });
 

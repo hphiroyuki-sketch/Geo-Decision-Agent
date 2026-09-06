@@ -51,8 +51,22 @@ export interface SensitiveCriterion {
   key: string;
   title: string;
   assessable: boolean;
+  /** A derived indicator, which is neither an assessment nor an absence of one. */
+  proxy?: boolean;
   result: string;
   requires?: string;
+  source?: string;
+  fetchedAt?: string | null;
+}
+
+export interface PublicDataStatus {
+  key: string;
+  label: string;
+  covers: string;
+  caveat: string;
+  status: "ok" | "failed" | "not_fetched";
+  error?: string;
+  fetchedAt?: string | null;
 }
 
 export type SiteVerdict = "attention" | "watch" | "clear" | "insufficient";
@@ -90,6 +104,8 @@ export interface LeapReport {
   meshComplete: boolean;
   sites: ScreenedSite[];
   sensitive: SensitiveCriterion[];
+  publicData: PublicDataStatus[];
+  screenPoint: { lat: number; lng: number } | null;
   components: LeapComponent[];
   coverageSummary: { covered: number; partial: number; notCovered: number; total: number };
   provenance: {

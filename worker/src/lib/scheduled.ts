@@ -140,6 +140,63 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
     }
   }
 
+  // The public datasets the screening report depends on. These run regardless
+  // of Earth Engine: a screening can still consult them when the satellite side
+  // is down, and the report claims their results, so a silent outage would put
+  // "該当なし" in a client document when the truth is "could not check".
+  for (const probe of [
+    {
+      name: "gbif",
+      url: `https://api.gbif.org/v1/occurrence/search?geoDistance=${PROBE.lat},${PROBE.lng},3km&limit=0`,
+      check: (body: unknown) => {
+        const d = body as { count?: number };
+        if (typeof d.count !== "number") throw new Error("count が返りませんでした");
+        return `ok (${d.count.toLocaleString()}件)`;
+      },
+    },
+  ]) {
+    const check = await timed(probe.name, async () => {
+      const res = await fetch(probe.url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { message: probe.check(await res.json()) };
+    });
+    results.push(check);
+    await record(env, check);
+  }
+
+  // The hazard tiles answer by HTTP status, so the probe checks that the
+  // service distinguishes a tile with data from one without - which is the
+  // whole basis of the water-risk judgement.
+  const hazardCheck = await timed("gsi_hazard", async () => {
+    // Central Tokyo at z16: inside the Arakawa flood inundation area.
+    const res = await fetch("https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/16/58205/25807.png", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status !== 200 && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+    const bytes = res.status === 200 ? (await res.arrayBuffer()).byteLength : 0;
+    return { message: `ok (HTTP ${res.status}${bytes ? `, ${bytes}B` : ""})` };
+  });
+  results.push(hazardCheck);
+  await record(env, hazardCheck);
+
+  const osmCheck = await timed("osm_protected", async () => {
+    const query = `[out:json][timeout:15];(nwr["boundary"="national_park"](around:20000,${PROBE.lat},${PROBE.lng}););out center tags 5;`;
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = (await res.json()) as { elements?: unknown[] };
+    return { message: `ok (${json.elements?.length ?? 0}件)` };
+  });
+  results.push(osmCheck);
+  await record(env, osmCheck);
+
   // Keep only recent history; this table is a diagnostic, not an archive.
   await env.DB.prepare(
     `DELETE FROM system_checks WHERE checked_at < datetime('now', '-2 days')`,
