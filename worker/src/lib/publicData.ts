@@ -186,6 +186,19 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): nu
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * Overpass runs as a set of independent volunteer-hosted instances, and the
+ * main one returned 521 from production on the first live check. Any single
+ * endpoint is therefore a single point of failure for this criterion, which is
+ * not acceptable when the feature is demonstrated live in front of a client.
+ * The mirrors are tried in order and the first that answers wins.
+ */
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+];
+
 export async function fetchProtectedAreas(
   env: Env,
   lat: number,
@@ -205,16 +218,30 @@ export async function fetchProtectedAreas(
   );out center tags 40;`;
 
   try {
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": UA },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: AbortSignal.timeout(25000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as {
+    let json: {
       elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
-    };
+    } | null = null;
+    const failures: string[] = [];
+
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": UA },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: AbortSignal.timeout(20000),
+        });
+        if (!res.ok) {
+          failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
+          continue;
+        }
+        json = await res.json();
+        break;
+      } catch (err) {
+        failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (!json) throw new Error(failures.join(" / "));
 
     const areas = (json.elements ?? [])
       .map((e) => {

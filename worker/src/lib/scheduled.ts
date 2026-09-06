@@ -167,32 +167,74 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
     await record(env, check);
   }
 
-  // The hazard tiles answer by HTTP status, so the probe checks that the
-  // service distinguishes a tile with data from one without - which is the
-  // whole basis of the water-risk judgement.
+  // The water-risk judgement rests entirely on the tile service answering 200
+  // where a designated area exists and 404 where none does. Confirming only the
+  // positive case would leave the dangerous failure untested: a service that
+  // answered 200 everywhere would mark every site 該当あり in a client document.
+  // So this probes both, and fails if the two cannot be told apart.
   const hazardCheck = await timed("gsi_hazard", async () => {
-    // Central Tokyo at z16: inside the Arakawa flood inundation area.
-    const res = await fetch("https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/16/58205/25807.png", {
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status !== 200 && res.status !== 404) throw new Error(`HTTP ${res.status}`);
-    const bytes = res.status === 200 ? (await res.arrayBuffer()).byteLength : 0;
-    return { message: `ok (HTTP ${res.status}${bytes ? `, ${bytes}B` : ""})` };
+    const probe = async (x: number, y: number) => {
+      const res = await fetch(
+        `https://disaportaldata.gsi.go.jp/raster/01_flood_l2_shinsuishin_data/16/${x}/${y}.png`,
+        { signal: AbortSignal.timeout(8000) },
+      );
+      const bytes = res.status === 200 ? (await res.arrayBuffer()).byteLength : 0;
+      return { status: res.status, bytes };
+    };
+
+    // Positive control: central Tokyo, inside the Arakawa inundation area.
+    const inside = await probe(58205, 25807);
+    // Negative control: the summit of Mt Fuji, where no flood inundation area
+    // is designated.
+    const outside = await probe(58022, 25882);
+
+    const insideHit = inside.status === 200 && inside.bytes > 1000;
+    const outsideHit = outside.status === 200 && outside.bytes > 1000;
+
+    if (insideHit && !outsideHit) {
+      return {
+        message: `ok（判別可: 該当地=200/${inside.bytes}B、非該当地=${outside.status}）`,
+        detail: JSON.stringify({ inside, outside }),
+      };
+    }
+    throw new Error(
+      `該当有無を判別できません（該当地=${inside.status}/${inside.bytes}B、非該当地=${outside.status}/${outside.bytes}B）。` +
+        `この状態では水リスクの判定を信頼できません。`,
+    );
   });
   results.push(hazardCheck);
   await record(env, hazardCheck);
 
+  // Mirrored for the same reason the live fetch is: the main instance returned
+  // 521 on the first production check, and one volunteer host being down must
+  // not take the criterion with it.
   const osmCheck = await timed("osm_protected", async () => {
     const query = `[out:json][timeout:15];(nwr["boundary"="national_park"](around:20000,${PROBE.lat},${PROBE.lng}););out center tags 5;`;
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: AbortSignal.timeout(25000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as { elements?: unknown[] };
-    return { message: `ok (${json.elements?.length ?? 0}件)` };
+    const endpoints = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter",
+    ];
+    const failures: string[] = [];
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: AbortSignal.timeout(20000),
+        });
+        if (!res.ok) {
+          failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
+          continue;
+        }
+        const json = (await res.json()) as { elements?: unknown[] };
+        return { message: `ok (${json.elements?.length ?? 0}件 / ${new URL(endpoint).host})` };
+      } catch (err) {
+        failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    throw new Error(failures.join(" / "));
   });
   results.push(osmCheck);
   await record(env, osmCheck);
