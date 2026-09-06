@@ -74,6 +74,37 @@ projectRoutes.get("/:id", async (c) => {
   return c.json({ project, conversations });
 });
 
+/** Editable project attributes. Used for the client name on a screening cover. */
+projectRoutes.patch("/:id", async (c) => {
+  const user = c.get("user") as AuthUser;
+  const id = c.req.param("id");
+  const body = await c.req.json<{ clientName?: string | null; name?: string; areaHa?: number | null }>();
+
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (body.clientName !== undefined) {
+    sets.push("client_name = ?");
+    values.push(body.clientName?.trim() || null);
+  }
+  if (body.name !== undefined && body.name.trim()) {
+    sets.push("name = ?");
+    values.push(body.name.trim());
+  }
+  if (body.areaHa !== undefined) {
+    sets.push("area_ha = ?");
+    values.push(body.areaHa);
+  }
+  if (sets.length === 0) return c.json({ ok: true });
+
+  sets.push("updated_at = ?");
+  values.push(new Date().toISOString(), id);
+  await c.env.DB.prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...values)
+    .run();
+  await logAudit(c.env.DB, user.id, "project.update", id, body as Record<string, unknown>);
+  return c.json({ ok: true });
+});
+
 projectRoutes.get("/:id/candidates", async (c) => {
   const id = c.req.param("id");
   const { results: candidates } = await c.env.DB.prepare(

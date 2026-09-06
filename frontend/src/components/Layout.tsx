@@ -127,9 +127,9 @@ export default function Layout() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden flex-col md:flex-row">
+    <div className="app-shell flex h-screen overflow-hidden flex-col md:flex-row">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-60 shrink-0 bg-[var(--gda-navy)] flex-col py-4">
+      <aside className="app-chrome hidden md:flex w-60 shrink-0 bg-[var(--gda-navy)] flex-col py-4">
         <div className="flex items-center gap-2 px-4 pb-4 mb-2 border-b border-white/10">
           <div className="w-8 h-8 rounded-md bg-[var(--gda-green)] flex items-center justify-center text-white font-bold shrink-0">
             G
@@ -147,7 +147,7 @@ export default function Layout() {
       </aside>
 
       {/* Mobile top bar */}
-      <header className="safe-top md:hidden flex items-center px-4 h-14 shrink-0 bg-[var(--gda-navy)] box-content">
+      <header className="app-chrome safe-top md:hidden flex items-center px-4 h-14 shrink-0 bg-[var(--gda-navy)] box-content">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-md bg-[var(--gda-green)] flex items-center justify-center text-white font-bold text-sm shrink-0">
             G
@@ -175,12 +175,12 @@ export default function Layout() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto bg-[var(--gda-bg)] pb-16 md:pb-0">
+      <main className="app-main flex-1 overflow-y-auto bg-[var(--gda-bg)] pb-16 md:pb-0">
         <Outlet />
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="safe-bottom md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--gda-navy)] border-t border-white/10 flex items-stretch h-16">
+      <nav className="app-chrome safe-bottom md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--gda-navy)] border-t border-white/10 flex items-stretch h-16">
         <NavLink
           to="/dashboard"
           className={({ isActive }) =>

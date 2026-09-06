@@ -156,4 +156,24 @@ input[type="range"]::-webkit-slider-thumb {
 
 @media print {
   .print-hide { display: none !important; }
+
+  /* A document handed to a client must be the document, not a screenshot of an
+     app. The navigation is hidden, and the scroll container is unwrapped -
+     a browser cannot paginate content inside `overflow: auto`, which is why
+     page breaks were being ignored. */
+  .app-chrome { display: none !important; }
+  .app-shell {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .app-main {
+    overflow: visible !important;
+    height: auto !important;
+    padding-bottom: 0 !important;
+  }
+  html, body, #root {
+    height: auto !important;
+    background: #fff !important;
+  }
 }

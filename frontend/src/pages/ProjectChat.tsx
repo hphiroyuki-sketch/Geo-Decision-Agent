@@ -475,7 +475,7 @@ export default function ProjectChat() {
             to={`/projects/${id}/leap`}
             className="col-span-2 flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 hover:text-slate-800 py-1"
           >
-            <BarChart3 size={12} /> TNFD（LEAP）形式で出力
+            <BarChart3 size={12} /> 簡易スクリーニング報告（TNFD LEAP準拠）
           </Link>
         </div>
       </div>

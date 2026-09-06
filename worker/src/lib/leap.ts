@@ -1,60 +1,105 @@
-// FR-053: TNFD LEAP-aligned output, and FR-034 report variants.
+// FR-053: TNFD LEAP-aligned screening output.
 //
-// LEAP is a disclosure framework, not an answer generator. Everything here is
-// assembled from rows this system actually holds; where a section has no data,
-// it says so and names how to obtain it rather than being filled in. A
-// disclosure built on invented content is worse than an incomplete one, so
-// "未取得" is a first-class outcome of this module.
+// LEAP is an assessment process, not an answer generator. Two rules govern this
+// module, and both exist because a nature disclosure built on invented content
+// is worse than an incomplete one:
+//
+//   1. Every figure is assembled from rows this system actually holds. Where a
+//      component has no data, it says so and names how to obtain it.
+//   2. Every component carries an explicit coverage verdict. Satellite data can
+//      evidence part of Locate; it cannot evidence dependency analysis or
+//      materiality. Presenting the whole of LEAP as "done" because the headings
+//      are present would misrepresent what the reader is holding.
+//
+// The component codes, titles and guiding questions follow TNFD's LEAP guidance
+// (v1.1). They are quoted rather than paraphrased so a reader can match this
+// output against the framework line by line.
 
 import type { Env } from "../types";
-import { CELL_CLASS_LABEL, type CellClass } from "./mesh";
+import { CELL_CLASS_LABEL, PRIORITY_A_THRESHOLD, CHANGED_THRESHOLD, type CellClass } from "./mesh";
 
-export type LeapStage = "locate" | "evaluate" | "assess" | "prepare";
+export type LeapPhase = "scoping" | "locate" | "evaluate" | "assess" | "prepare";
 
-export const LEAP_STAGE_META: Record<LeapStage, { code: string; title: string; question: string }> = {
+/** What this system can actually evidence for a given component. */
+export type Coverage = "covered" | "partial" | "not_covered";
+
+export const COVERAGE_LABEL: Record<Coverage, string> = {
+  covered: "対応",
+  partial: "部分対応",
+  not_covered: "本システム対象外",
+};
+
+export const PHASE_META: Record<LeapPhase, { code: string; title: string; intent: string }> = {
+  scoping: {
+    code: "S",
+    title: "スコーピング",
+    intent: "LEAPを始める前に、対象範囲と仮説を定める段階。",
+  },
   locate: {
     code: "L",
-    title: "Locate（自然との接点を特定する）",
-    question: "事業はどこで自然と接しているか。優先的に注意すべき地域はどこか。",
+    title: "Locate — 自然との接点を特定する",
+    intent: "事業がどこで自然と接しているか、優先的に注意すべき地域はどこかを特定する。",
   },
   evaluate: {
     code: "E",
-    title: "Evaluate（依存と影響を診断する）",
-    question: "その場所で、事業は自然に何を依存し、何の影響を与えているか。",
+    title: "Evaluate — 依存と影響を診断する",
+    intent: "その場所で、事業が自然に何を依存し、何の影響を与えているかを診断する。",
   },
   assess: {
     code: "A",
-    title: "Assess（リスクと機会を評価する）",
-    question: "そこから生じるリスクと機会は何か。重要なものはどれか。",
+    title: "Assess — リスクと機会を評価する",
+    intent: "そこから生じるリスクと機会のうち、重要なものを特定する。",
   },
   prepare: {
     code: "P",
-    title: "Prepare（対応と開示を準備する）",
-    question: "何に取り組み、何を開示し、どう測るか。",
+    title: "Prepare — 対応と開示を準備する",
+    intent: "何に取り組み、何を開示し、どう測るかを決める。",
   },
 };
 
 export interface LeapItem {
   label: string;
   value: string;
-  /** Where the number came from, so a reviewer can check it. */
-  basis: "measured" | "field_confirmed" | "estimated" | "missing";
+  /** Where the figure came from, so a reviewer can check it. */
+  basis: "measured" | "field_confirmed" | "map_designated" | "configured" | "estimated" | "missing";
   note?: string;
 }
 
-export interface LeapSection {
-  stage: LeapStage;
-  summary: string;
+export const BASIS_LABEL: Record<LeapItem["basis"], string> = {
+  measured: "衛星実測",
+  field_confirmed: "現地確認済み",
+  map_designated: "地図上で指定（現地未確認）",
+  configured: "登録・設定値",
+  estimated: "推定値",
+  missing: "未取得",
+};
+
+export interface LeapComponent {
+  code: string;
+  phase: LeapPhase;
+  /** TNFD's official component name, kept in English for traceability. */
+  titleEn: string;
+  title: string;
+  question: string;
+  coverage: Coverage;
+  /** One line saying what this system did or did not establish. */
+  verdict: string;
   items: LeapItem[];
   gaps: string[];
 }
 
-export const BASIS_LABEL: Record<LeapItem["basis"], string> = {
-  measured: "衛星実データ",
-  field_confirmed: "現地確認済み",
-  estimated: "推定値",
-  missing: "未取得",
-};
+/**
+ * TNFD's five characteristics of a sensitive location. Three of them need
+ * public datasets this system has not connected; saying so per criterion is
+ * the difference between an honest screening and a misleading one.
+ */
+export interface SensitiveCriterion {
+  key: string;
+  title: string;
+  assessable: boolean;
+  result: string;
+  requires?: string;
+}
 
 interface ProjectRow {
   id: string;
@@ -64,21 +109,42 @@ interface ProjectRow {
   area_ha: number | null;
   center_lat: number | null;
   center_lng: number | null;
+  client_name: string | null;
   created_at: string;
 }
 
-/** Assembles the four LEAP sections for one project from its own rows. */
+export interface ScreenedSite {
+  label: string;
+  lat: number | null;
+  lng: number | null;
+  /** Plain-language screening outcome for the executive summary. */
+  verdict: "attention" | "watch" | "clear" | "insufficient";
+  reason: string;
+  score: number | null;
+  evidence: string[];
+}
+
+export const SITE_VERDICT_LABEL: Record<ScreenedSite["verdict"], string> = {
+  attention: "配慮が必要",
+  watch: "監視・要確認",
+  clear: "特記事項なし",
+  insufficient: "情報不足",
+};
+
+/** Assembles the LEAP screening for one project from its own rows. */
 export async function buildLeapReport(env: Env, projectId: string) {
   const project = await env.DB.prepare(
-    "SELECT id, name, description, use_case, area_ha, center_lat, center_lng, created_at FROM projects WHERE id = ?",
+    `SELECT id, name, description, use_case, area_ha, center_lat, center_lng, client_name, created_at
+     FROM projects WHERE id = ?`,
   )
     .bind(projectId)
     .first<ProjectRow>();
   if (!project) throw new Error("プロジェクトが見つかりません。");
 
   const mesh = await env.DB.prepare(
-    `SELECT id, cell_size_m, extent_m, year, reference_points, completed_at
-     FROM meshes WHERE project_id = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 1`,
+    `SELECT id, cell_size_m, extent_m, year, detect_change, reference_points, center_lat, center_lng,
+            status, completed_at, created_at
+     FROM meshes WHERE project_id = ? ORDER BY (status = 'ready') DESC, created_at DESC LIMIT 1`,
   )
     .bind(projectId)
     .first<{
@@ -86,8 +152,13 @@ export async function buildLeapReport(env: Env, projectId: string) {
       cell_size_m: number;
       extent_m: number;
       year: number;
+      detect_change: number;
       reference_points: number;
+      center_lat: number;
+      center_lng: number;
+      status: string;
       completed_at: string | null;
+      created_at: string;
     }>();
 
   const cellCounts = mesh
@@ -97,8 +168,24 @@ export async function buildLeapReport(env: Env, projectId: string) {
         )
           .bind(mesh.id)
           .all<{ cell_class: string; n: number }>()
-      ).results
+    ).results
     : [];
+
+  const meshStats = mesh
+    ? await env.DB.prepare(
+        `SELECT COUNT(*) AS sampled, MIN(reference_similarity) AS sim_min, MAX(reference_similarity) AS sim_max,
+                MAX(change_score) AS chg_max, AVG(change_score) AS chg_avg
+         FROM mesh_cells WHERE mesh_id = ? AND status = 'sampled'`,
+      )
+        .bind(mesh.id)
+        .first<{
+          sampled: number;
+          sim_min: number | null;
+          sim_max: number | null;
+          chg_max: number | null;
+          chg_avg: number | null;
+        }>()
+    : null;
 
   const hotspots = mesh
     ? (
@@ -107,18 +194,19 @@ export async function buildLeapReport(env: Env, projectId: string) {
         )
           .bind(mesh.id)
           .all<{ cell_class: string; n: number; area_ha: number }>()
-      ).results
+    ).results
     : [];
 
   const { results: fieldStats } = await env.DB.prepare(
-    "SELECT review_status, COUNT(*) AS n FROM field_records WHERE project_id = ? GROUP BY review_status",
+    `SELECT review_status, source, COUNT(*) AS n FROM field_records WHERE project_id = ? GROUP BY review_status, source`,
   )
     .bind(projectId)
-    .all<{ review_status: string; n: number }>();
+    .all<{ review_status: string; source: string; n: number }>();
 
   const { results: species } = await env.DB.prepare(
     `SELECT DISTINCT species_guess FROM field_records
-     WHERE project_id = ? AND review_status = 'confirmed' AND species_guess IS NOT NULL LIMIT 20`,
+     WHERE project_id = ? AND review_status = 'confirmed' AND source = 'field'
+       AND species_guess IS NOT NULL LIMIT 20`,
   )
     .bind(projectId)
     .all<{ species_guess: string }>();
@@ -131,135 +219,447 @@ export async function buildLeapReport(env: Env, projectId: string) {
     .all<{ stage: string; status: string; n: number; area_ha: number }>();
 
   const { results: candidates } = await env.DB.prepare(
-    `SELECT label, score, rank, habitat_overlap, protected_area_distance_km, evidence_basis
-     FROM site_candidates WHERE project_id = ? ORDER BY rank LIMIT 10`,
+    `SELECT label, lat, lng, score, rank, confidence, evidence_basis, ndre_change_pct, ndre_measured,
+            alphaearth_similarity, field_records_count, recommended_action
+     FROM site_candidates WHERE project_id = ? ORDER BY rank LIMIT 20`,
   )
     .bind(projectId)
     .all<{
       label: string;
+      lat: number | null;
+      lng: number | null;
       score: number;
       rank: number;
-      habitat_overlap: number | null;
-      protected_area_distance_km: number | null;
+      confidence: string;
       evidence_basis: string | null;
+      ndre_change_pct: number | null;
+      ndre_measured: number;
+      alphaearth_similarity: number | null;
+      field_records_count: number;
+      recommended_action: string;
     }>();
 
-  const confirmed = fieldStats.find((f) => f.review_status === "confirmed")?.n ?? 0;
-  const unreviewed = fieldStats.find((f) => f.review_status === "unreviewed")?.n ?? 0;
+  const analysis = await env.DB.prepare(
+    `SELECT id, model, prompt_version, engine_version, earth_engine_year, embedding_dataset, indices_dataset,
+            earth_engine_available, executed_at
+     FROM analyses WHERE project_id = ? ORDER BY executed_at DESC LIMIT 1`,
+  )
+    .bind(projectId)
+    .first<{
+      id: string;
+      model: string;
+      prompt_version: string;
+      engine_version: string;
+      earth_engine_year: number | null;
+      embedding_dataset: string | null;
+      indices_dataset: string | null;
+      earth_engine_available: number;
+      executed_at: string;
+    }>();
+
+  const countBy = (status: string, source?: string) =>
+    fieldStats
+      .filter((f) => f.review_status === status && (source ? f.source === source : true))
+      .reduce((s, f) => s + f.n, 0);
+
+  const confirmedField = countBy("confirmed", "field");
+  const mapPins = countBy("confirmed", "map_pin");
+  const unreviewed = countBy("unreviewed");
   const areaOf = (cls: string) => hotspots.find((h) => h.cell_class === cls)?.area_ha ?? 0;
   const countOf = (cls: string) => hotspots.find((h) => h.cell_class === cls)?.n ?? 0;
+  const sampled = meshStats?.sampled ?? 0;
+  const meshComplete = mesh?.status === "ready";
+  const hasMeshResult = sampled > 0;
 
-  const sections: LeapSection[] = [];
+  // --- Sites screened -------------------------------------------------------
+  const sites: ScreenedSite[] = [];
 
-  // --- Locate ---------------------------------------------------------------
-  const locateItems: LeapItem[] = [
+  if (mesh && hasMeshResult) {
+    const changed = countOf("changed");
+    const priority = countOf("priority_a");
+    sites.push({
+      label: `${project.name}（メッシュ解析範囲）`,
+      lat: mesh.center_lat,
+      lng: mesh.center_lng,
+      verdict: changed > 0 ? "watch" : priority > 0 ? "attention" : "clear",
+      reason:
+        changed > 0
+          ? `前年から大きく変化した区域を ${changed} 件（${areaOf("changed").toFixed(2)}ha）検出。原因は衛星では判定できないため現地確認が必要。`
+          : priority > 0
+            ? `確認済み環境と高い類似度を示す区域を ${priority} 件（${areaOf("priority_a").toFixed(2)}ha）検出。改変を避ける配慮が必要。`
+            : `${sampled.toLocaleString()} マスを取得したが、しきい値を超える区域は検出されていない。`,
+      score: null,
+      evidence: [
+        `${mesh.cell_size_m}mメッシュ ${sampled.toLocaleString()}マス（${mesh.extent_m}m四方・${mesh.year}年）`,
+        mesh.reference_points > 0 ? `基準地点 ${mesh.reference_points} 地点` : "基準地点なし（変化検出のみ）",
+      ],
+    });
+  }
+
+  for (const c of candidates) {
+    sites.push({
+      label: c.label,
+      lat: c.lat,
+      lng: c.lng,
+      verdict: c.confidence === "低" ? "insufficient" : c.score >= 75 ? "clear" : c.score >= 55 ? "watch" : "attention",
+      reason:
+        c.confidence === "低"
+          ? `信頼度「低」。判断の裏付けが不足しており、この結果だけで立地を決めることはできない。`
+          : `総合スコア ${c.score}／推奨アクション: ${c.recommended_action}`,
+      score: c.score,
+      evidence: (c.evidence_basis ?? "").split(",").filter(Boolean),
+    });
+  }
+
+  // --- Sensitive location screening (TNFD's five characteristics) -----------
+  const sensitive: SensitiveCriterion[] = [
     {
-      label: "対象地",
-      value:
-        project.center_lat != null && project.center_lng != null
-          ? `${project.name}（中心 ${project.center_lat.toFixed(5)}, ${project.center_lng.toFixed(5)}）`
-          : project.name,
-      basis: project.center_lat != null ? "measured" : "missing",
+      key: "biodiversity_importance",
+      title: "生物多様性にとって重要な地域",
+      assessable: false,
+      result: "判定不可",
+      requires:
+        "保護区域・KBA（生物多様性重要地域）・自然共生サイト等の公的指定データとの照合が必要です。本システムには未接続です。",
     },
     {
-      label: "対象面積",
-      value: project.area_ha ? `${project.area_ha.toLocaleString()} ha` : "未登録",
-      basis: project.area_ha ? "measured" : "missing",
+      key: "high_integrity",
+      title: "生態系の完全性が高い地域",
+      assessable: hasMeshResult && (mesh?.reference_points ?? 0) > 0,
+      result:
+        hasMeshResult && (mesh?.reference_points ?? 0) > 0
+          ? countOf("priority_a") > 0
+            ? `該当あり：${countOf("priority_a")} 区域（${areaOf("priority_a").toFixed(2)}ha）が判定基準 ${PRIORITY_A_THRESHOLD} を超過`
+            : `該当なし：判定基準 ${PRIORITY_A_THRESHOLD} を超える区域は検出されず（最大類似度 ${meshStats?.sim_max?.toFixed(2) ?? "—"}）`
+          : "判定不可",
+      requires:
+        hasMeshResult && (mesh?.reference_points ?? 0) > 0
+          ? "本判定は基準地点との相対的な類似度によるものです。絶対的な生態系完全性指標（例：Biodiversity Intactness Index）との照合は未実施です。"
+          : "基準地点の設定と10mメッシュ解析が必要です。",
     },
     {
-      label: "解析解像度",
-      value: mesh ? `${mesh.cell_size_m}m メッシュ（範囲 ${mesh.extent_m}m四方、対象年 ${mesh.year}）` : "未実施",
-      basis: mesh ? "measured" : "missing",
+      key: "rapid_decline",
+      title: "生態系の完全性が急速に低下している地域",
+      assessable: hasMeshResult && mesh?.detect_change === 1,
+      result:
+        hasMeshResult && mesh?.detect_change === 1
+          ? countOf("changed") > 0
+            ? `該当あり：${countOf("changed")} 区域（${areaOf("changed").toFixed(2)}ha）が判定基準 ${CHANGED_THRESHOLD} を超過`
+            : `該当なし：判定基準 ${CHANGED_THRESHOLD} を超える変化は検出されず（最大変化スコア ${meshStats?.chg_max?.toFixed(3) ?? "—"}）`
+          : "判定不可",
+      requires:
+        hasMeshResult && mesh?.detect_change === 1
+          ? "前年比1年分の比較です。長期傾向の判定には複数年の解析が必要です。変化の原因は衛星では特定できません。"
+          : "「前年との変化も調べる」を有効にした10mメッシュ解析が必要です。",
     },
     {
-      label: "解析セル数",
-      value: cellCounts.length
-        ? cellCounts.map((c) => `${CELL_CLASS_LABEL[c.cell_class as CellClass] ?? c.cell_class}: ${c.n}`).join(" / ")
-        : "未実施",
-      basis: cellCounts.length ? "measured" : "missing",
+      key: "water_risk",
+      title: "物理的な水リスクが高い地域",
+      assessable: false,
+      result: "判定不可",
+      requires:
+        "流域界・取水量・渇水/洪水リスクの公的データ（例：WRI Aqueduct、国土数値情報）との照合が必要です。本システムには未接続です。",
+    },
+    {
+      key: "ecosystem_services",
+      title: "生態系サービス供給上、重要な地域",
+      assessable: false,
+      result: "判定不可",
+      requires:
+        "水源涵養・土壌保持・受粉等のサービス評価が必要です。本システムは影響側の面的変化のみを扱い、依存側の評価は対象外です。",
     },
   ];
-  const locateGaps: string[] = [];
-  if (!mesh) locateGaps.push("10mメッシュ解析が未実施です。対象地の状態を面として把握するため、先に実行してください。");
-  if (!project.area_ha) locateGaps.push("対象面積が未登録です。プロジェクト設定で登録してください。");
-  sections.push({
-    stage: "locate",
-    summary: mesh
-      ? `${project.name} の対象地を ${mesh.cell_size_m}m メッシュで基線化し、保全優先 ${countOf("priority_a")} 区域（${areaOf("priority_a").toFixed(2)}ha）、回復候補 ${countOf("similar")} 区域（${areaOf("similar").toFixed(2)}ha）、要現地確認 ${countOf("changed")} 区域（${areaOf("changed").toFixed(2)}ha）を特定した。`
-      : `${project.name} の対象地は登録済みだが、面としての基線化（10mメッシュ解析）が未実施のため、優先地域の特定は完了していない。`,
-    items: locateItems,
-    gaps: locateGaps,
+
+  // --- The 16 components ----------------------------------------------------
+  const components: LeapComponent[] = [];
+  const add = (c: LeapComponent) => components.push(c);
+
+  add({
+    code: "S",
+    phase: "scoping",
+    titleEn: "Scoping",
+    title: "スコーピング",
+    question: "何を対象に、どの範囲まで、どの仮説を検証するのか。",
+    coverage: "partial",
+    verdict:
+      "対象地と解析範囲は本システムで定義済み。バリューチェーン（上流・下流）の範囲設定は利用者側の作業です。",
+    items: [
+      {
+        label: "対象範囲",
+        value: project.area_ha
+          ? `${project.name}／${project.area_ha.toLocaleString()} ha`
+          : `${project.name}（面積未登録）`,
+        basis: project.area_ha ? "configured" : "missing",
+      },
+      {
+        label: "ユースケース区分",
+        value: project.use_case,
+        basis: "configured",
+      },
+      {
+        label: "解析対象年",
+        value: mesh ? `${mesh.year}年（前年比較 ${mesh.detect_change === 1 ? "あり" : "なし"}）` : "未設定",
+        basis: mesh ? "configured" : "missing",
+      },
+    ],
+    gaps: [
+      "バリューチェーン上流・下流の範囲設定は本システムの対象外です。",
+      "評価の目的（新規立地判断／既存拠点の開示／認定申請）を先に確定してください。出力の使い方が変わります。",
+    ],
   });
 
-  // --- Evaluate -------------------------------------------------------------
-  const evaluateItems: LeapItem[] = [
-    {
-      label: "現地確認された生物・植物",
-      value: species.length ? species.map((s) => s.species_guess).join("、") : "確認済み記録なし",
-      basis: species.length ? "field_confirmed" : "missing",
-      note: species.length ? undefined : "査読済みの現地記録がないため、生息種に基づく評価ができません。",
-    },
-    {
-      label: "現地記録の件数",
-      value: `確認済み ${confirmed} 件 / 未査読 ${unreviewed} 件`,
-      basis: confirmed > 0 ? "field_confirmed" : "missing",
-    },
-    {
-      label: "基準地点（類似度の比較元）",
-      value: mesh ? `${mesh.reference_points} 地点` : "未設定",
-      basis: mesh && mesh.reference_points > 0 ? "field_confirmed" : "missing",
-      note:
-        mesh && mesh.reference_points === 0
-          ? "基準地点がないため、保全優先・回復候補の判定は成立していません（変化検出のみ）。"
-          : undefined,
-    },
-    {
-      label: "生息地重複度・保護区域距離",
-      value: candidates.length
-        ? candidates
-            .map(
-              (c) =>
-                `${c.label}: 重複 ${c.habitat_overlap != null ? `${(c.habitat_overlap * 100).toFixed(0)}%` : "—"}、保護区域まで ${c.protected_area_distance_km?.toFixed(1) ?? "—"}km`,
-            )
-            .join(" / ")
-        : "候補地の比較分析が未実施",
-      basis: candidates.length ? "estimated" : "missing",
-      note: candidates.length
-        ? "本MVPでは重複度・保護区域距離はシミュレーション値です。開示前に公的な指定区域データとの照合が必要です。"
-        : undefined,
-    },
-  ];
-  const evaluateGaps: string[] = [];
-  if (confirmed === 0)
-    evaluateGaps.push("査読済みの現地記録がありません。現場で撮影・記録し、査読して「確認済み」にしてください。");
-  if (unreviewed > 0) evaluateGaps.push(`未査読の現地記録が ${unreviewed} 件あります。査読すると評価に反映されます。`);
-  evaluateGaps.push(
-    "生態系サービスへの依存（水源涵養・受粉・土壌保持等）の定量評価は本システムの対象外です。専門家評価を別途実施してください。",
-  );
-  sections.push({
-    stage: "evaluate",
-    summary:
-      confirmed > 0
-        ? `衛星による面的評価と、現地で確認された ${confirmed} 件の記録（${species.length} 種）を重ね合わせて、対象地の生物多様性状態を評価した。`
-        : "衛星による面的評価は実施したが、現地記録の裏付けがないため、依存・影響の評価は暫定である。",
-    items: evaluateItems,
-    gaps: evaluateGaps,
+  add({
+    code: "L1",
+    phase: "locate",
+    titleEn: "Business footprint",
+    title: "事業のフットプリント",
+    question: "直接操業する資産・拠点と、関連するバリューチェーンの活動はどこにあるか。",
+    coverage: sites.length > 0 ? "covered" : "not_covered",
+    verdict:
+      sites.length > 0
+        ? `直接操業に関する ${sites.length} 地点を座標で特定済み。`
+        : "拠点が登録されていません。座標を登録すると特定できます。",
+    items: [
+      {
+        label: "スクリーニング対象地点数",
+        value: `${sites.length} 地点`,
+        basis: sites.length > 0 ? "configured" : "missing",
+      },
+      {
+        label: "対象地の中心座標",
+        value:
+          project.center_lat != null && project.center_lng != null
+            ? `${project.center_lat.toFixed(5)}, ${project.center_lng.toFixed(5)}`
+            : "未登録",
+        basis: project.center_lat != null ? "configured" : "missing",
+      },
+    ],
+    gaps: ["上流・下流のバリューチェーン拠点は登録・評価の対象外です。"],
   });
 
-  // --- Assess ---------------------------------------------------------------
-  const assessItems: LeapItem[] = [
+  add({
+    code: "L2",
+    phase: "locate",
+    titleEn: "Nature interface",
+    title: "自然との接点",
+    question:
+      "それらの活動はどのバイオーム・生態系と接しているか。各地点の生態系の完全性と重要性は現在どうか。",
+    coverage: hasMeshResult ? "partial" : "not_covered",
+    verdict: hasMeshResult
+      ? "衛星による地表状態と前年比変化は実測済み。ただしバイオーム・生態系タイプの分類は未接続のため、「どの生態系か」は本システムでは確定できません。"
+      : "10mメッシュ解析が未実施のため、自然との接点は把握できていません。",
+    items: [
+      {
+        label: "解析条件",
+        value: mesh ? `${mesh.cell_size_m}m メッシュ／${mesh.extent_m}m四方` : "未実施",
+        basis: mesh ? "configured" : "missing",
+      },
+      {
+        label: "実際に取得したマス数",
+        value: hasMeshResult ? `${sampled.toLocaleString()} マス` : "未取得",
+        basis: hasMeshResult ? "measured" : "missing",
+      },
+      {
+        label: "地表状態の分布",
+        value: cellCounts.length
+          ? cellCounts
+              .map((c) => `${CELL_CLASS_LABEL[c.cell_class as CellClass] ?? c.cell_class} ${c.n}マス`)
+              .join("／")
+          : "未実施",
+        basis: cellCounts.length ? "measured" : "missing",
+      },
+      {
+        label: "基準地点との類似度（範囲）",
+        value:
+          meshStats?.sim_max != null
+            ? `${meshStats.sim_min?.toFixed(2)} 〜 ${meshStats.sim_max.toFixed(2)}`
+            : "未算出",
+        basis: meshStats?.sim_max != null ? "measured" : "missing",
+      },
+      {
+        label: "生態系タイプの分類",
+        value: "未実施",
+        basis: "missing",
+        note: "バイオーム／生態系タイプの判定には土地被覆分類データとの接続が必要です。",
+      },
+    ],
+    gaps: [
+      "バイオーム・生態系タイプの分類が未接続です。TNFDが求める「どの生態系と接しているか」の記述には、土地被覆分類データとの照合が必要です。",
+      "生態系の重要性（希少性・代替不可能性）の判定は未接続です。",
+    ],
+  });
+
+  add({
+    code: "L3",
+    phase: "locate",
+    titleEn: "Priority location identification",
+    title: "優先地域の特定",
+    question:
+      "高い生態系完全性を持つ地域、完全性が急速に低下している地域、生物多様性上重要な地域、水ストレス地域、重大な依存・影響が想定される地域はどこか。",
+    coverage: sensitive.some((s) => s.assessable) ? "partial" : "not_covered",
+    verdict: (() => {
+      const done = sensitive.filter((s) => s.assessable).length;
+      // The reason a criterion was not assessed matters: "we have no dataset for
+      // it" and "you have not run the analysis yet" call for different actions.
+      const blockedByData = sensitive.filter(
+        (s) => !s.assessable && ["biodiversity_importance", "water_risk", "ecosystem_services"].includes(s.key),
+      ).length;
+      const blockedByRun = 5 - done - blockedByData;
+      return (
+        `TNFDが定める感度の高い地域の5基準のうち、本システムで判定できたのは ${done} 基準です。` +
+        `${blockedByData} 基準は公的データ未接続のため判定していません。` +
+        (blockedByRun > 0 ? `残り ${blockedByRun} 基準は解析が未実施のため判定できていません。` : "")
+      );
+    })(),
+    items: sensitive.map((s) => ({
+      label: s.title,
+      value: s.result,
+      basis: s.assessable ? ("measured" as const) : ("missing" as const),
+      note: s.requires,
+    })),
+    gaps: sensitive.filter((s) => !s.assessable).map((s) => `${s.title}：${s.requires ?? "データ未接続"}`),
+  });
+
+  add({
+    code: "L4",
+    phase: "locate",
+    titleEn: "Sector identification",
+    title: "セクターの特定",
+    question: "優先地域で自然と接しているのは、どのセクター・事業単位・バリューチェーン・資産クラスか。",
+    coverage: "partial",
+    verdict: "プロジェクトのユースケース区分のみ保持しています。事業単位・資産クラスの紐付けは利用者側の作業です。",
+    items: [{ label: "ユースケース区分", value: project.use_case, basis: "configured" }],
+    gaps: ["事業単位・資産クラス・バリューチェーン区分との紐付けは本システムの対象外です。"],
+  });
+
+  add({
+    code: "E1",
+    phase: "evaluate",
+    titleEn: "Identification of relevant environmental assets and ecosystem services",
+    title: "環境資産・生態系サービスの特定",
+    question: "各優先地域でどの事業活動が行われ、どの環境資産・生態系サービスに依存／影響しているか。",
+    coverage: "not_covered",
+    verdict:
+      "セクター別の依存・影響マッピング（ENCORE等）は未接続です。本システムは影響側の面的変化を測るもので、依存側の特定は行いません。",
+    items: [
+      {
+        label: "依存・影響マッピング",
+        value: "未実施",
+        basis: "missing",
+        note: "セクター×生態系サービスの標準マッピングとの接続が必要です。",
+      },
+    ],
+    gaps: ["生態系サービスへの依存（水源涵養・受粉・土壌保持等）の特定は専門家評価を別途実施してください。"],
+  });
+
+  add({
+    code: "E2",
+    phase: "evaluate",
+    titleEn: "Identification of dependencies and impacts",
+    title: "依存と影響の特定",
+    question: "各優先地域で、どのような自然関連の依存と影響があるか。",
+    coverage: confirmedField > 0 || hasMeshResult ? "partial" : "not_covered",
+    verdict:
+      confirmedField > 0
+        ? "現地で確認された種と、衛星による面的変化から、影響側の手がかりを提示しています。依存側は対象外です。"
+        : "現地確認済みの記録がないため、影響の内容を裏付ける一次データがありません。",
+    items: [
+      {
+        label: "現地確認された生物・植物",
+        value: species.length ? species.map((s) => s.species_guess).join("、") : "確認済み記録なし",
+        basis: species.length ? "field_confirmed" : "missing",
+      },
+      {
+        label: "現地記録の件数",
+        value: `現地確認済み ${confirmedField} 件／未査読 ${unreviewed} 件`,
+        basis: confirmedField > 0 ? "field_confirmed" : "missing",
+      },
+      {
+        label: "地図上で指定した基準地点",
+        value: `${mapPins} 地点`,
+        basis: mapPins > 0 ? "map_designated" : "missing",
+        note:
+          mapPins > 0
+            ? "衛星画像上での指定であり、現地確認の記録ではありません。判定の裏付けとしては現地記録より弱いものです。"
+            : undefined,
+      },
+    ],
+    gaps: [
+      confirmedField === 0
+        ? "現地確認済みの記録がありません。開示に用いる前に現地調査を実施してください。"
+        : "確認種は調査時点のものであり、網羅的な種リストではありません。",
+      "依存（自然から受けている便益）の特定は本システムの対象外です。",
+    ],
+  });
+
+  add({
+    code: "E3",
+    phase: "evaluate",
+    titleEn: "Dependency and impact measurement",
+    title: "依存と影響の測定",
+    question: "依存の規模と範囲、負の影響の深刻度、正の影響の規模と範囲はどれほどか。",
+    coverage: hasMeshResult ? "partial" : "not_covered",
+    verdict: hasMeshResult
+      ? "影響側は面積（ha）と変化スコアで定量化済み。依存側は未測定です。"
+      : "メッシュ解析が未実施のため、定量化できていません。",
+    items: [
+      {
+        label: "保全上の配慮が必要な面積",
+        value: hasMeshResult ? `${areaOf("priority_a").toFixed(2)} ha（${countOf("priority_a")} 区域）` : "未算出",
+        basis: hasMeshResult ? "measured" : "missing",
+      },
+      {
+        label: "回復候補の面積",
+        value: hasMeshResult ? `${areaOf("similar").toFixed(2)} ha（${countOf("similar")} 区域）` : "未算出",
+        basis: hasMeshResult ? "measured" : "missing",
+      },
+      {
+        label: "大きな変化を検出した面積",
+        value: hasMeshResult ? `${areaOf("changed").toFixed(2)} ha（${countOf("changed")} 区域）` : "未算出",
+        basis: hasMeshResult ? "measured" : "missing",
+      },
+      {
+        label: "使用した指標",
+        value: "Satellite Embedding 類似度（64次元・10m・年次）、前年比変化スコア、NDVI／NDRE／NDMI／NBR",
+        basis: "configured",
+      },
+    ],
+    gaps: ["依存側（水・土壌・受粉等）の規模と範囲は未測定です。", "正の影響の測定は施策実施後の効果検証で行います。"],
+  });
+
+  add({
+    code: "E4",
+    phase: "evaluate",
+    titleEn: "Impact materiality assessment",
+    title: "影響の重要性評価",
+    question: "どの影響が重要（material）か。",
+    coverage: "not_covered",
+    verdict: "重要性の判断基準は企業ごとに定めるものであり、本システムは判定しません。判断材料として面積と変化量を提供します。",
+    items: [
+      {
+        label: "重要性の判断",
+        value: "未判定",
+        basis: "missing",
+        note: "企業の重要性判断基準（閾値）を設定のうえ、社内で判定してください。",
+      },
+    ],
+    gaps: ["重要性の閾値設定と判定は、企業の開示方針に基づき実施してください。"],
+  });
+
+  const riskItems: LeapItem[] = [
     {
-      label: "物理的リスク（生息地への影響）",
+      label: "物理的リスク（生息環境への影響）",
       value:
         countOf("priority_a") > 0
-          ? `保全優先区域 ${areaOf("priority_a").toFixed(2)}ha に事業が及ぶ場合、回復困難な影響が生じる可能性が高い。`
-          : "保全優先水準の区域は検出されていない。",
-      basis: mesh ? "measured" : "missing",
+          ? `保全上の配慮が必要な区域 ${areaOf("priority_a").toFixed(2)}ha に事業が及ぶ場合、回復困難な影響が生じる可能性があります。`
+          : hasMeshResult
+            ? "しきい値を超える区域は検出されていません。"
+            : "未評価",
+      basis: hasMeshResult ? "measured" : "missing",
     },
     {
       label: "移行リスク（規制・開示）",
       value:
-        "TNFD/SSBJ開示、環境アセスメント、林地開発許可等の要否は、事業規模と立地により決まる。本システムは判定しない。",
+        "TNFD／SSBJ開示、環境影響評価、林地開発許可等の要否は事業規模と立地により決まります。本システムは判定しません。",
       basis: "missing",
       note: "法令適合性の判断は、必ず所管行政庁および専門家に確認してください。",
     },
@@ -267,99 +667,240 @@ export async function buildLeapReport(env: Env, projectId: string) {
       label: "機会（回復による価値創出）",
       value:
         countOf("similar") > 0
-          ? `回復候補区域 ${areaOf("similar").toFixed(2)}ha は、施策の費用対効果が高い可能性がある区域として特定済み。代償措置の候補にもなり得る。`
-          : "回復候補区域は検出されていない。",
-      basis: mesh ? "measured" : "missing",
-    },
-    {
-      label: "監視が必要な変化",
-      value:
-        countOf("changed") > 0
-          ? `${countOf("changed")} 区域（${areaOf("changed").toFixed(2)}ha）で前年から大きな変化を検出。原因未特定。`
-          : "大きな変化は検出されていない。",
-      basis: mesh ? "measured" : "missing",
-      note: countOf("changed") > 0 ? "衛星は変化の有無のみを示します。原因の特定には現地確認が必要です。" : undefined,
+          ? `回復候補区域 ${areaOf("similar").toFixed(2)}ha は施策の費用対効果が高い可能性があり、代償措置の候補にもなり得ます。`
+          : "回復候補区域は検出されていません。",
+      basis: hasMeshResult ? "measured" : "missing",
     },
   ];
-  sections.push({
-    stage: "assess",
-    summary:
-      countOf("priority_a") + countOf("changed") > 0
-        ? `保全優先 ${areaOf("priority_a").toFixed(2)}ha と要確認 ${areaOf("changed").toFixed(2)}ha を重要度の高いリスク箇所として特定した。回復候補 ${areaOf("similar").toFixed(2)}ha は機会として扱う。`
-        : "現時点で重要度の高いリスク箇所は特定されていない。監視を継続する。",
-    items: assessItems,
-    gaps: [
-      "財務影響の定量化（コスト増分、回避便益）は未実装です。FR-056として段階導入予定の範囲です。",
-      "バリューチェーン上流・下流の自然関連リスクは対象外です。",
-    ],
+
+  add({
+    code: "A1",
+    phase: "assess",
+    titleEn: "Risk and opportunity identification",
+    title: "リスクと機会の特定",
+    question: "対応するリスクと機会は何か。",
+    coverage: hasMeshResult ? "partial" : "not_covered",
+    verdict: hasMeshResult
+      ? "スクリーニング結果からリスク・機会の候補を提示しています。網羅性は保証しません。"
+      : "スクリーニングが未実施のため、候補を提示できません。",
+    items: riskItems,
+    gaps: ["バリューチェーン上流・下流のリスクは対象外です。", "評判・市場・賠償責任リスクは本システムの対象外です。"],
   });
 
-  // --- Prepare --------------------------------------------------------------
-  const byStage = (stage: string) => actions.filter((a) => a.stage === stage);
-  const stageSummary = (stage: string, label: string): LeapItem => {
-    const rows = byStage(stage);
+  const stageRows = (stage: string) => actions.filter((a) => a.stage === stage);
+  const stageItem = (stage: string, label: string): LeapItem => {
+    const rows = stageRows(stage);
     const total = rows.reduce((s, r) => s + r.n, 0);
     const area = rows.reduce((s, r) => s + (r.area_ha ?? 0), 0);
     const done = rows.filter((r) => r.status === "done").reduce((s, r) => s + r.n, 0);
     return {
       label,
-      value: total > 0 ? `${total} 件（対象 ${area.toFixed(2)}ha、完了 ${done} 件）` : "施策なし",
+      value: total > 0 ? `${total} 件（対象 ${area.toFixed(2)}ha／完了 ${done} 件）` : "施策なし",
       basis: total > 0 ? "measured" : "missing",
     };
   };
 
-  const prepareItems: LeapItem[] = [
-    stageSummary("avoid", "回避（立地・配置の変更）"),
-    stageSummary("reduce", "低減（工法・時期・配置）"),
-    stageSummary("restore", "回復"),
-    stageSummary("offset", "オフセット（代償）"),
-    {
-      label: "測定指標",
-      value:
-        "Satellite Embedding 類似度、前年比の変化スコア、NDVI/NDRE/NDMI/NBR、現地確認種数、改変面積(ha)",
-      basis: "measured",
-    },
-    {
-      label: "測定頻度",
-      value: "衛星：年1回（対象年更新時） / 現地：施策区分により年1〜2回",
-      basis: "measured",
-    },
-  ];
-
-  const prepareGaps: string[] = [];
-  const ownerless = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM recovery_actions WHERE project_id = ? AND owner_user_id IS NULL",
-  )
-    .bind(projectId)
-    .first<{ n: number }>();
-  if ((ownerless?.n ?? 0) > 0)
-    prepareGaps.push(`担当者が未設定の施策が ${ownerless?.n} 件あります。開示前に責任者と期限を確定してください。`);
-  prepareGaps.push("本出力は「案」です。開示にあたっては、社内の確認者による承認と、専門家レビューを経てください。");
-
-  sections.push({
-    stage: "prepare",
-    summary:
+  add({
+    code: "A2",
+    phase: "assess",
+    titleEn: "Existing risk mitigation and management",
+    title: "既存の低減策・管理手法",
+    question: "すでに適用している低減策・管理手法は何か。",
+    coverage: actions.length > 0 ? "partial" : "not_covered",
+    verdict:
       actions.length > 0
-        ? "ミティゲーション・ヒエラルキー（回避→低減→回復→オフセット）の順に施策を整理し、区域・期待変化・測定指標・頻度を設定した。"
-        : "施策が未登録です。10mメッシュ解析を実行すると、重要区域ごとの施策案が生成されます。",
-    items: prepareItems,
-    gaps: prepareGaps,
+        ? "本システムに登録された施策のみを集計しています。社内で既に実施している管理手法は含みません。"
+        : "登録された施策がありません。",
+    items: [
+      stageItem("avoid", "回避（Avoid）"),
+      stageItem("reduce", "低減（Reduce／Minimise）"),
+      stageItem("restore", "回復（Restore／Regenerate）"),
+      stageItem("offset", "オフセット（代償）"),
+    ],
+    gaps: ["社内で既に実施している環境管理施策は、別途棚卸のうえ追記してください。"],
   });
+
+  add({
+    code: "A3",
+    phase: "assess",
+    titleEn: "Risk and opportunity measurement and prioritisation",
+    title: "リスクと機会の測定・優先順位づけ",
+    question: "どのリスク・機会を優先すべきか。",
+    coverage: hasMeshResult || candidates.length > 0 ? "partial" : "not_covered",
+    verdict:
+      hasMeshResult || candidates.length > 0
+        ? "面積・変化量・連結度から重要度を算出し、区域および候補地の順位を提示しています。財務影響の定量化は未実装です。"
+        : "順位づけの材料がありません。",
+    items: [
+      {
+        label: "区域の優先順位",
+        value: hasMeshResult
+          ? `重要区域 ${countOf("priority_a") + countOf("similar") + countOf("changed")} 件を面積・連結度・信号強度で順位づけ済み`
+          : "未算出",
+        basis: hasMeshResult ? "measured" : "missing",
+      },
+      {
+        label: "候補地の順位",
+        value: candidates.length
+          ? candidates.map((c) => `${c.rank}. ${c.label}（${c.score}点）`).join("／")
+          : "候補地比較は未実施",
+        basis: candidates.length ? "estimated" : "missing",
+        note: candidates.length
+          ? "総合スコアの構成要素のうち、生息地重複度・保護区域距離・アクセスは本MVPではシミュレーション値です。"
+          : undefined,
+      },
+    ],
+    gaps: ["財務影響（コスト増分・回避便益）の定量化は未実装です。"],
+  });
+
+  add({
+    code: "A4",
+    phase: "assess",
+    titleEn: "Risk and opportunity materiality assessment",
+    title: "リスクと機会の重要性評価",
+    question: "どのリスク・機会が重要であり、TNFD推奨開示に沿って開示すべきか。",
+    coverage: "not_covered",
+    verdict: "重要性の判定は企業の開示方針に基づく判断であり、本システムは行いません。",
+    items: [{ label: "重要性の判定", value: "未判定", basis: "missing" }],
+    gaps: ["開示対象とするリスク・機会の選定は、社内の重要性判断プロセスで決定してください。"],
+  });
+
+  add({
+    code: "P1",
+    phase: "prepare",
+    titleEn: "Strategy and resource allocation plans",
+    title: "戦略と資源配分の計画",
+    question: "この分析の結果、どのようなリスク管理・戦略・資源配分の意思決定を行うか。",
+    coverage: actions.length > 0 ? "partial" : "not_covered",
+    verdict:
+      actions.length > 0
+        ? "区域ごとに、緩和ヒエラルキー（回避→低減→回復→オフセット）の順で施策案を生成しています。予算配分は含みません。"
+        : "施策案が未生成です。メッシュ解析を実行すると生成されます。",
+    items: [
+      stageItem("avoid", "回避"),
+      stageItem("reduce", "低減"),
+      stageItem("restore", "回復"),
+      stageItem("offset", "オフセット"),
+      {
+        label: "対応するSBTNのAR3T区分",
+        value: "Avoid／Reduce／Restore・Regenerate／（Transformは対象外）",
+        basis: "configured",
+        note: "緩和ヒエラルキー（IFC PS6由来）とAR3Tの対応関係です。Transform（システム変革）は本システムの範囲外です。",
+      },
+    ],
+    gaps: ["予算・人員の配分計画は本システムの対象外です。"],
+  });
+
+  add({
+    code: "P2",
+    phase: "prepare",
+    titleEn: "Target setting and performance management",
+    title: "目標設定と実績管理",
+    question: "どう目標を設定し、進捗をどう定義・測定するか。",
+    coverage: actions.length > 0 ? "partial" : "not_covered",
+    verdict:
+      actions.length > 0
+        ? "施策ごとに測定指標・頻度・対象面積を設定済み。科学的根拠に基づく目標（SBTs for Nature）との整合は未実施です。"
+        : "目標設定の対象となる施策がありません。",
+    items: [
+      {
+        label: "測定指標",
+        value: "Satellite Embedding 類似度、前年比変化スコア、NDVI／NDRE／NDMI／NBR、現地確認種数、改変面積(ha)",
+        basis: "configured",
+      },
+      { label: "測定頻度", value: "衛星：年1回（対象年更新時）／現地：施策区分により年1〜2回", basis: "configured" },
+      {
+        label: "科学的根拠に基づく目標との整合",
+        value: "未実施",
+        basis: "missing",
+        note: "SBTN の目標設定手法との整合確認は別途必要です。",
+      },
+    ],
+    gaps: ["ベースライン年の確定と、目標値の設定は利用者側で行ってください。"],
+  });
+
+  add({
+    code: "P3",
+    phase: "prepare",
+    titleEn: "Reporting",
+    title: "報告",
+    question: "TNFD推奨開示に沿って何を開示するか。",
+    coverage: "partial",
+    verdict:
+      "本スクリーニング帳票は、TNFD推奨開示のうち「戦略」「指標と目標」の一部に資する素材を提供します。14の推奨開示への対応は利用者側の作業です。",
+    items: [
+      {
+        label: "本帳票が資する開示領域",
+        value: "戦略（優先地域・影響面積）、指標と目標（測定指標・頻度）",
+        basis: "configured",
+      },
+      {
+        label: "ガバナンス／リスクと影響の管理",
+        value: "対象外",
+        basis: "missing",
+        note: "取締役会の監督体制、リスク管理プロセスの記述は企業側の作業です。",
+      },
+    ],
+    gaps: ["TNFDの4つの柱・14の推奨開示への対応整理は、本帳票を素材として社内で実施してください。"],
+  });
+
+  add({
+    code: "P4",
+    phase: "prepare",
+    titleEn: "Presentation",
+    title: "提示",
+    question: "自然関連開示をどこで、どのように提示するか。",
+    coverage: "not_covered",
+    verdict: "開示媒体（有価証券報告書、統合報告書、サステナビリティ報告書等）の選択は企業の判断です。",
+    items: [
+      {
+        label: "開示媒体",
+        value: "未設定",
+        basis: "missing",
+        note: "日本ではSSBJ基準が2027年3月期から段階適用（2026年3月期から任意適用）。現時点で確定しているのは気候関連であり、自然関連は今後の動向確認が必要です。",
+      },
+    ],
+    gaps: ["開示媒体と時期の決定は、開示規制の適用時期を踏まえて計画してください。"],
+  });
+
+  const coverageCount = (c: Coverage) => components.filter((x) => x.coverage === c).length;
 
   return {
     project: {
       id: project.id,
       name: project.name,
+      clientName: project.client_name,
       useCase: project.use_case,
       areaHa: project.area_ha,
       centerLat: project.center_lat,
       centerLng: project.center_lng,
     },
     generatedAt: new Date().toISOString(),
-    dataAsOf: mesh?.completed_at ?? null,
+    dataAsOf: mesh?.completed_at ?? mesh?.created_at ?? null,
     meshId: mesh?.id ?? null,
-    sections,
-    /** Everything a reviewer must supply before this can be disclosed. */
-    outstanding: sections.flatMap((s) => s.gaps),
+    meshComplete,
+    sites,
+    sensitive,
+    components,
+    coverageSummary: {
+      covered: coverageCount("covered"),
+      partial: coverageCount("partial"),
+      notCovered: coverageCount("not_covered"),
+      total: components.length,
+    },
+    provenance: {
+      analysisId: analysis?.id ?? null,
+      model: analysis?.model ?? null,
+      engineVersion: analysis?.engine_version ?? null,
+      earthEngineYear: analysis?.earth_engine_year ?? mesh?.year ?? null,
+      embeddingDataset: analysis?.embedding_dataset ?? "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
+      indicesDataset: analysis?.indices_dataset ?? "COPERNICUS/S2_SR_HARMONIZED",
+      earthEngineAvailable: analysis ? analysis.earth_engine_available === 1 : null,
+      executedAt: analysis?.executed_at ?? null,
+    },
+    /** Everything a reviewer must supply before this can inform a disclosure. */
+    outstanding: components.flatMap((c) => c.gaps),
   };
 }
+
+export type LeapReport = Awaited<ReturnType<typeof buildLeapReport>>;
