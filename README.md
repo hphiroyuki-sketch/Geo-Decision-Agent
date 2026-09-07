@@ -26,6 +26,7 @@ AI意思決定支援エージェント。
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | **ADR。変更する前に必ず読む** |
 | [`docs/HISTORY.md`](docs/HISTORY.md) | 実際に踏んだ不具合と根本原因 |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | デプロイ・本番確認・トラブル対応 |
+| [`docs/manual/`](docs/manual/) | **操作ガイド（利用者向け・HTML）。** 画面写真と遷移図つき |
 | [`CLAUDE.md`](CLAUDE.md) | AIエージェント／開発者向けの作業ガイド |
 
 ---
