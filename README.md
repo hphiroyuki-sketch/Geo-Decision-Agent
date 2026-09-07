@@ -1,130 +1,163 @@
-# Geo Decision Agent (MVP)
+# Geo Decision Agent（ForestScope）
 
-生物多様性に配慮した立地・設備判断を支援する意思決定エージェント。要件定義書 v3.0 の UC-01（生物多様性配慮の立地・設備判断）を中心に、招待制の限定公開アプリとして実装した MVP です。
+衛星データ × 現地データで、**TNFDのLEAPに沿った立地・設備の生物多様性影響を判定する**
+AI意思決定支援エージェント。
 
-**公開URL**: https://geo-decision-agent.hphiroyuki.workers.dev（招待制ログインのため、招待コードなしではアカウント作成不可）
+要件定義書 v3.0 の UC-01（生物多様性配慮の立地・設備判断）を中心に実装。
+**招待制の限定公開アプリ**であり、一般には公開していない。
 
-## この MVP でできること
+**本番URL**: https://geo-decision-agent.hphiroyuki.workers.dev
+（招待コードなしではアカウントを作成できない）
 
-- **招待制ログイン**: 管理者が発行した招待コードを持つ人だけがアカウントを作成できます。サインアップは公開されていません。
-- **Claude API による実チャット**: `@anthropic-ai/sdk` を使い、Claude（既定: `claude-sonnet-5`）とストリーミングで会話します。
-- **月次予算の自動停止**: 月間のAI利用コストを円換算で集計し、管理画面で設定した上限（既定 ¥5,000）に達すると、当月はチャットが自動的に停止します。
-- **構造化ツール呼び出しによる分析**: LLM は生の数値を作文せず、`analyze_site_candidates` という構造化ツールを呼び出し、その結果だけを根拠に説明します（要件書 FR-004 に対応）。
-- **4つの主要画面**: ホーム（プロジェクトマップ・ステータス）／AI調査チャット＋地図／分析結果（候補地ランキング・ミティゲーション案）／意思決定レポート（監査証跡・レビュー・PDF書き出し）。
-- **現地記録（現地調査モバイル、V-05）**: スマホのカメラ・GPSで写真・位置・種候補を記録し、R2に保存。分析時に候補地から2km以内の現地記録を実データとして参照する。
-- **Google Earth Engine連携（任意）**: `EE_SERVICE_ACCOUNT_JSON` を設定すると、Satellite Embeddingの実データを取得し、現地記録で確認済みの地点の埋め込みベクトルを平均した「基準ベクトル」との類似度を候補地ごとに算出する。未設定の場合は自動的にシミュレーション値にフォールバックする。
-- **10mメッシュ解析（FR-020/023/025/026）**: 対象地を10m四方に区切り、1マスずつ衛星エンベディングを実取得。確認済み現地記録との類似度と前年比の変化から、保全優先・回復候補・要現地確認に色分けし、隣接するマスを重要区域としてまとめて順位付けする。航空写真・3D地形表示に対応。
-- **回復計画（FR-052/054）**: 重要区域ごとに、回避→低減→回復→オフセットの順で施策を生成。施策区域・期待変化・測定指標・頻度に加え、担当者・期限・状態を設定できる。
-- **TNFD LEAP出力（FR-053）**: Locate/Evaluate/Assess/Prepare の4段階を実データから生成。データが無い項目は「未取得」と明示し、取得方法を併記する。PDF出力可。
-- **アラート（FR-060）**: しきい値超過・査読滞留を検出し、重要度・次アクション付きで未読管理。しきい値は画面から変更できる。
-- **管理画面**: 招待コードの発行・失効、ユーザー管理、月次利用状況グラフ、予算上限の変更、衛星データ連携の稼働状況。
+---
 
-## ドキュメント
+## 📖 ドキュメント
+
+**初めて触る方（人間・AIを問わず）は [`docs/README.md`](docs/README.md) から読んでください。**
+システムの全体像・設計判断・過去の不具合まで、会話履歴に依存せず理解できるよう書いてあります。
 
 | 文書 | 内容 |
 |---|---|
-| `docs/BUILD_PLAN.md` | 想定利用者（担当者・開示実務・決裁者）と、その課題から導いたUI方針。実装順序とその根拠 |
-| `docs/REQUIREMENTS_COVERAGE.md` | 要件定義書のFR・V番号ごとの実装状況（実装／部分／未実装）と、部分実装の制限内容 |
-| `docs/ACCEPTANCE_REVIEW.md` | 受入確認の結果、意図的に実装しなかったことの記録、納品前に合意が必要な項目 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | **何のシステムか／なぜこの形か／モジュール地図。まずこれ** |
+| [`docs/DOMAIN.md`](docs/DOMAIN.md) | TNFD・LEAP・感度の高い地域5基準 |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | D1の全テーブルと存在理由 |
+| [`docs/EXTERNAL_SERVICES.md`](docs/EXTERNAL_SERVICES.md) | 外部API6種の制限と失敗時の挙動 |
+| [`docs/API.md`](docs/API.md) | 全エンドポイントと画面ルート |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | **ADR。変更する前に必ず読む** |
+| [`docs/HISTORY.md`](docs/HISTORY.md) | 実際に踏んだ不具合と根本原因 |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | デプロイ・本番確認・トラブル対応 |
+| [`CLAUDE.md`](CLAUDE.md) | AIエージェント／開発者向けの作業ガイド |
 
-## 実装していないこと（本番販売前に必要な作業）
+---
 
-要件定義書は Google Earth Engine 連携・TNFD/SSBJ自動出力・マルチテナントRBAC・SSO/SAMLなど、本格的なエンタープライズSaaSを要求しています。このMVPでは以下は**意図的に対象外**です。
+## できること
 
-詳細は `docs/REQUIREMENTS_COVERAGE.md`（FR・V番号ごとの対応表）と `docs/ACCEPTANCE_REVIEW.md` を参照してください。
+### 中核
 
-| 項目 | 現状 | 本番化に必要なこと |
-|---|---|---|
-| 保護区域・急傾斜・流域界・土地被覆 | **シミュレーション値**（画面上で「推定値」と明示） | 公的データへの接続。実務判断に用いる前に必須 |
-| 衛星指標（NDVI/NDRE/NDMI/NBR） | Sentinel-2からの取得経路を実装済み。**クエリの疎通確認が未完了** | 管理設定の「衛星データ連携の稼働状況」で確認し、失敗していれば関数名を修正 |
-| 電力設備（FR-040〜047 / V-07） | 未実装 | 設備台帳・流域界・取水口データの受領 |
-| マルチテナント/RBAC | 単一テナント、ロールは admin/member/viewer の3段階のみ | 11章のデータモデルに沿ったテナント分離、ABAC |
-| SSO/SAML/SCIM | メール＋パスワードのみ | OIDC/SAML連携 |
-| 基盤地図タイル | 国土地理院・Esri・OpenStreetMap の無償タイル | 商用提供時は各提供元の利用規約確認、または有償契約（`frontend/src/components/MapView.tsx` のURL定義1箇所で切替可能） |
-| 定期実行（cron） | 登録済みだが発火が確認できていない。アプリ利用中の自己診断で代替 | Cloudflare ダッシュボードで Cron Triggers の状態を確認 |
-| セキュリティ診断 | 未実施 | SAST/DAST/SCA、ペネトレーションテスト（14章・21章） |
+- **10mメッシュ解析** — 対象地を10m四方に区切り、Google Satellite Embedding（64次元）を
+  1マスずつ実取得。確認済み現地記録との類似度と前年比の変化から、
+  保全優先／類似／変化あり／一般区域に色分けし、隣接マスを重要区域としてまとめて順位付け。
+  航空写真・3D地形表示・年代スライダーに対応
+- **今見ている画面の範囲で解析** — 地図をパン／ズームして、その範囲に対して直接メッシュを生成できる
+  （Googleマップの「周辺で探す」相当）。基準点も地図上のクリックで指定できる
+- **TNFD LEAP スクリーニング** — **16コンポーネント＋スコーピング**と
+  **感度の高い地域5基準**を判定し、A4印刷対応のPDFまたはMarkdownで出力。
+  全項目に根拠区分（衛星実測／現地確認済み／地図上で指定／登録・設定値／推定値／未取得）が付く
+- **公的データとの照合** — GBIF（生物記録・IUCN絶滅危惧カテゴリ）、
+  国土地理院ハザードマップ（洪水・高潮・津波・土砂災害3種）、OpenStreetMap（保護区域）
 
-## アーキテクチャ
+### 支援機能
 
-- **Cloudflare Workers**（Hono） + **D1**（SQLite）+ **Workers Static Assets**（React SPA）の単一デプロイ。
-- `worker/src/routes/chat.ts` がチャットのコア: Claude にツール `analyze_site_candidates` を渡し、Claude がツール利用を選ぶと `worker/src/lib/geoEngine.ts` の決定的シミュレーションエンジンを実行し、その結果だけをツール結果として返す。数値の作文は行わない。
-- 認証は WebCrypto PBKDF2 によるパスワードハッシュ + HMAC 署名付きセッションCookie（`worker/src/lib/crypto.ts`, `worker/src/lib/auth.ts`）。
-- 予算制御は `usage_log` テーブルに月次でトークン数・USD/JPYコストを記録し、月初からの合計が上限を超えるとチャットAPIが `budget_exceeded` イベントを返して停止する（`worker/src/lib/pricing.ts`, `worker/src/routes/chat.ts`）。
+- **AI対話** — Claude（既定 `claude-sonnet-5`）とのストリーミング対話。
+  **数値はLLMが作文せず**、構造化ツール `analyze_site_candidates` の結果だけを根拠に説明する
+- **月次予算の自動停止** — 上限（既定 ¥5,000）に達すると当月はチャットが停止
+- **現地調査（モバイル）** — スマホのカメラ・GPS・種候補を記録しR2へ保存。査読フロー付き
+- **回復計画** — 重要区域ごとに 回避→低減→回復→オフセット の順で施策を生成
+- **アラート** — しきい値超過・査読滞留を、重要度と次アクション付きで通知
+- **意思決定レポート** — 監査証跡・レビュー・承認・PDF書き出し
+- **表示モード** — かんたん／ビジネス／エキスパートで出す情報の粒度を切り替え
+- **PWA** — ホーム画面追加、更新通知、オフライン表示。**API応答は意図的にキャッシュしない**
+- **管理画面** — 招待発行、ユーザー管理、利用状況、予算設定、衛星連携の稼働状況
+
+---
+
+## アーキテクチャ（概要）
+
+**Cloudflare Workers（Hono）＋ D1（SQLite）＋ R2 ＋ Workers Static Assets（React SPA）の単一デプロイ。**
 
 ```
 worker/src/
-  index.ts            # Hono アプリのエントリポイント
-  routes/             # auth / admin / projects / chat
-  lib/                # crypto, db, auth, pricing, geoEngine, anthropicClient
+  index.ts        Honoアプリ／ルート単位の認証／cronエントリ
+  routes/         auth, admin, projects, chat, fieldRecords, mesh, alerts, dashboard
+  lib/            crypto, auth, db, pricing, anthropicClient, googleAuth,
+                  earthEngine, fieldData, mesh, geoEngine, recoveryPlan,
+                  publicData, leap, scheduled
 frontend/src/
-  pages/              # Login, Register, Home, ProjectChat, AnalysisResults, DecisionReport, Admin
-  components/         # Layout（サイドバー）, MapView（MapLibre GL）
-migrations/0001_init.sql  # D1 スキーマ
+  pages/          16画面（MeshView と LeapReport が最大）
+  components/     Layout, MapView(MapLibre GL), MapControlPanel, Explain, ui/*
+  lib/            api, auth, displayMode, leapTypes, screeningDoc, pwa
+migrations/       0001〜0009（追記のみ）
 ```
+
+詳細は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+
+---
 
 ## セットアップ
 
 ```bash
 npm install
-```
-
-### 必要なシークレット
-
-```bash
-npx wrangler secret put ANTHROPIC_API_KEY   # Claude APIキー（console.anthropic.com で発行）
-npx wrangler secret put SESSION_SECRET      # ランダムな長い文字列（openssl rand -hex 32 等）
-```
-
-### ローカル開発
-
-```bash
 npm run build:frontend
 npx wrangler d1 migrations apply geo-decision-agent-db --local
-npm run dev   # http://localhost:8787
+npm run dev                    # http://localhost:8787
 ```
 
-### デプロイ
+シークレットは `.dev.vars`（gitignore済み）に置く。
+必要な値とデプロイ手順は [`docs/OPERATIONS.md`](docs/OPERATIONS.md) を参照。
 
-**自分のPC・サーバーから**（Cloudflareへ直接ネットワーク到達できる環境):
+### 検証
 
 ```bash
-npm run deploy
+npm run typecheck:worker
+npm run build:frontend
 ```
 
-**GitHub Actions から**（サンドボックス環境からは Cloudflare API へ直接到達できないため、こちらを利用):
+**自動テストはありません。** 理由と、足すならどこからかは
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8。
 
-`.github/workflows/deploy.yml` が push / 手動実行でデプロイします。リポジトリの Settings → Secrets and variables → Actions で以下を登録してください。
+---
 
-| Secret名 | 値 |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | Cloudflareで発行したAPIトークン |
-| `CLOUDFLARE_ACCOUNT_ID` | CloudflareアカウントID |
-| `ANTHROPIC_API_KEY` | Claude APIキー |
-| `APP_SESSION_SECRET` | セッション署名用のランダムな文字列（`openssl rand -hex 32` 等で生成） |
-| `EE_SERVICE_ACCOUNT_JSON`（任意） | Earth Engine権限を持つGoogleサービスアカウントのJSON鍵の中身 |
-| `EE_PROJECT_ID`（任意） | Earth Engine登録済みのGCPプロジェクトID（サービスアカウント自身のプロジェクトと同じなら省略可） |
+## 本番が正常か確かめる
 
-R2バケット（現地記録の写真保存用）はCloudflareダッシュボードで一度R2を有効化した後、デプロイ時に自動作成されます。
+**「画面が動いているから正常」は成り立ちません。**
+Earth Engine が落ちてもアプリは静かにシミュレーション値へフォールバックします。
 
-### Earth Engine連携の診断（管理者のみ）
+`/admin` の稼働状況、または D1 を直接：
 
-分析フローはEarth Engineの失敗時にシミュレーション値へ静かにフォールバックするため、連携が動いているかは以下のエンドポイントで確認する。
+```sql
+SELECT check_name, ok, message, checked_at
+FROM system_checks ORDER BY checked_at DESC LIMIT 7;
+```
 
-| エンドポイント | 用途 |
-|---|---|
-| `GET /api/admin/ee-test` | 鍵の有無→鍵の解析→OAuth→実際のサンプリング、と段階ごとに判定し、失敗した段階と上流の生エラーを返す（鍵の中身は返さない）。`?lat=&lng=&year=` で地点指定、`?nofilter=1` で日付フィルタを外して切り分け |
-| `GET /api/admin/ee-algorithms?q=` | Earth Engineが実際に公開しているサーバー側関数名と引数名を検索する。式グラフはこの名前と完全一致する必要があり、クライアントライブラリのメソッド名（例 `filterDate`）とは異なるため、名前の食い違いはここで確定させる |
+読み方は [`docs/OPERATIONS.md`](docs/OPERATIONS.md) §4。
+特に **`gsi_hazard` が「該当地=200／非該当地=404」の両方を報告していること**を必ず確認してください。
 
-登録後、Actions タブから `Deploy to Cloudflare Workers` を手動実行（Run workflow）するか、このブランチへpushすると自動デプロイされます。
+---
 
-## 管理者アカウントの作成（初回のみ）
+## 現在の到達点と、残っていること
 
-管理者にはあらかじめ 1 件だけ、`hphiroyuki@gmail.com` 宛の招待コードを D1 に登録済みです。`/register` からそのコードでアカウントを作成すると、ロール `admin` で登録されます。以後は管理画面（`/admin`）から追加の招待コードを発行してください。
+### 感度の高い地域 5基準（TNFD）
 
-## 予算・モデルの調整
+| 基準 | 状態 | 根拠 |
+|---|---|---|
+| 生物多様性にとって重要な地域 | **判定済** | GBIF ＋ OSM保護区域 |
+| 生態系の完全性が高い地域 | **判定済** | 自システム10mメッシュ |
+| 完全性が急速に低下している地域 | **判定済** | 自システム10mメッシュ（前年比） |
+| 物理的な水リスクが高い地域 | **判定済** | 国土地理院ハザードタイル |
+| 生態系サービス供給上、重要な地域 | **代理指標** | 全国規模の権威データが存在しないため |
 
-`/admin` 画面、または D1 の `settings` テーブルで以下を変更できます。
+**「判定不可」はゼロ。** 5番を「判定済」と表示しないのは、
+代理指標を評価と偽ることが、この帳票が存在する理由に反するため。
 
-- `monthly_budget_jpy`: 月間上限（円）。既定 5000。
-- `usd_jpy_rate`: コスト換算に使う為替レート。既定 155。
-- `claude_model`: 使用するモデルID。既定 `claude-sonnet-5`（コスト重視。より高精度が必要なら `claude-opus-5` 等に変更可能。ただし出力単価が2.5倍になるため、月間予算に対して利用可能なメッセージ数が大きく減ります）。
+### 本番販売の前に必要なこと
+
+| 項目 | 現状 | 必要なこと |
+|---|---|---|
+| セキュリティ診断 | 未実施 | SAST/DAST/SCA、ペネトレーションテスト（要件14章・21章） |
+| 地図タイルの利用規約 | 無償枠 | 商用提供時に各提供元の規約確認、または有償契約（`MapView.tsx` の1箇所で切替可能） |
+| マルチテナント／RBAC | 単一テナント、3ロールのみ | `tenant_id` の追加と全クエリへの適用 |
+| SSO / SAML / SCIM | メール＋パスワードのみ | OIDC / SAML連携 |
+| 電力設備（FR-040〜047 / V-07） | 未実装 | 設備台帳・流域界・取水口データの受領 |
+| 資料取込・文書検索（FR-010〜014） | 未実装 | RAG基盤の追加 |
+| 自動テスト | 無し | `mesh.ts` の純関数から着手 |
+| OpenStreetMap（保護区域） | 接続済みだが恒常的に混雑 | Cloudflare共有IPへのレート制限。任意項目のため他の判定に影響なし |
+
+FR・V番号ごとの詳細は [`docs/REQUIREMENTS_COVERAGE.md`](docs/REQUIREMENTS_COVERAGE.md)。
+
+---
+
+## 🔴 セキュリティ
+
+- **シークレットは絶対にコミットしない。** `.dev.vars` は `.gitignore` 済み
+- コミット前に `git ls-files | grep -i "dev.vars\|\.env"` が空であることを確認
+- ワークフローのシェルスクリプト内で `${{ }}` を展開しない（必ず `env:` 経由）
