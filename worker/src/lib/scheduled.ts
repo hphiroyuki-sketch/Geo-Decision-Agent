@@ -12,6 +12,7 @@ import type { Env } from "../types";
 import { newId } from "./crypto";
 import { getSetting } from "./db";
 import { fetchEmbeddingVector, fetchSpectralIndices, listAlgorithms } from "./earthEngine";
+import { isProviderSideStatus } from "./publicData";
 
 interface CheckResult {
   name: string;
@@ -226,7 +227,7 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
           signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) {
-          if (res.status !== 429 && res.status !== 504) allBusy = false;
+          if (!isProviderSideStatus(res.status)) allBusy = false;
           failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
           continue;
         }
@@ -237,14 +238,15 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
         failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    // Every mirror answered, and every one of them said "too many requests".
-    // That is Overpass enforcing a per-IP quota against Cloudflare's shared
-    // egress addresses, not a fault in this system, and nothing else depends
-    // on this optional source. Recording it red would leave the admin panel
-    // permanently red for a normal condition, which is how an operator learns
-    // to stop reading the panel - the one outcome a self-check cannot afford.
+    // Every mirror answered, and every answer was the provider's own condition
+    // - a per-IP quota against Cloudflare's shared egress, or a mirror whose
+    // origin is down. Neither is a fault in this system, and nothing else
+    // depends on this optional source. Recording it red would leave the admin
+    // panel permanently red for a normal condition, which is how an operator
+    // learns to stop reading the panel - the one outcome a self-check cannot
+    // afford. A 4xx or a parse error still fails, so a real regression shows.
     if (allBusy && failures.length === endpoints.length) {
-      return { message: `混雑（全ミラーがレート制限中／任意項目のため判定への影響なし）`, detail: failures.join(" / ") };
+      return { message: `混雑（全ミラーが応答不可／任意項目のため判定への影響なし）`, detail: failures.join(" / ") };
     }
     throw new Error(failures.join(" / "));
   });

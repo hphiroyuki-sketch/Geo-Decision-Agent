@@ -194,6 +194,25 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): nu
  * not acceptable when the feature is demonstrated live in front of a client.
  * The mirrors are tried in order and the first that answers wins.
  */
+/**
+ * Whether an HTTP status from a volunteer-run mirror is the provider's
+ * condition rather than a fault in our request.
+ *
+ * Overpass instances rate-limit per source IP, and this Worker shares
+ * Cloudflare's egress addresses with everything else on the platform, so 429
+ * says nothing about us. Neither does a 5xx - production has seen 521 (the
+ * mirror's own origin down) alongside 429 from the others. Both mean "come
+ * back later"; recording either as a failure would put 取得失敗 in a client
+ * document for a source that is merely unavailable, and nothing else depends
+ * on it.
+ *
+ * Anything else - a 4xx that is not 429, a DNS or parse error - is ours, and
+ * still has to surface as a failure so a real regression stays visible.
+ */
+export function isProviderSideStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -246,12 +265,7 @@ export async function fetchProtectedAreas(
           signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) {
-          // Overpass instances rate-limit per source IP, and this Worker shares
-          // Cloudflare's egress addresses with everything else on the platform,
-          // so 429 is a routine condition rather than a fault. Recording it as a
-          // failure would put "取得失敗" in a client document for a source that
-          // is merely busy.
-          if (res.status === 429 || res.status === 504) rateLimited = true;
+          if (isProviderSideStatus(res.status)) rateLimited = true;
           failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
           continue;
         }
