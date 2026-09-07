@@ -216,6 +216,7 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
       "https://overpass.private.coffee/api/interpreter",
     ];
     const failures: string[] = [];
+    let allBusy = true;
     for (const endpoint of endpoints) {
       try {
         const res = await fetch(endpoint, {
@@ -225,14 +226,25 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
           signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) {
+          if (res.status !== 429 && res.status !== 504) allBusy = false;
           failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
           continue;
         }
         const json = (await res.json()) as { elements?: unknown[] };
         return { message: `ok (${json.elements?.length ?? 0}件 / ${new URL(endpoint).host})` };
       } catch (err) {
+        allBusy = false;
         failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+    // Every mirror answered, and every one of them said "too many requests".
+    // That is Overpass enforcing a per-IP quota against Cloudflare's shared
+    // egress addresses, not a fault in this system, and nothing else depends
+    // on this optional source. Recording it red would leave the admin panel
+    // permanently red for a normal condition, which is how an operator learns
+    // to stop reading the panel - the one outcome a self-check cannot afford.
+    if (allBusy && failures.length === endpoints.length) {
+      return { message: `混雑（全ミラーがレート制限中／任意項目のため判定への影響なし）`, detail: failures.join(" / ") };
     }
     throw new Error(failures.join(" / "));
   });
