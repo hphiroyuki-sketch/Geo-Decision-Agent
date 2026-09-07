@@ -213,6 +213,20 @@ export function isProviderSideStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+/**
+ * The same question for a thrown error rather than a status.
+ *
+ * A request that we sent successfully and that was not answered inside the
+ * timeout is the provider being too slow, not a fault here - so it belongs
+ * with 429 and 5xx. A DNS failure or a parse error does not: those mean the
+ * host or the response shape changed under us, and have to stay visible.
+ */
+export function isProviderSideError(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : "";
+  const msg = err instanceof Error ? err.message : String(err);
+  return name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(msg);
+}
+
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -272,6 +286,7 @@ export async function fetchProtectedAreas(
         json = await res.json();
         break;
       } catch (err) {
+        if (isProviderSideError(err)) rateLimited = true;
         failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }

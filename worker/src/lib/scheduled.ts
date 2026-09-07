@@ -12,7 +12,7 @@ import type { Env } from "../types";
 import { newId } from "./crypto";
 import { getSetting } from "./db";
 import { fetchEmbeddingVector, fetchSpectralIndices, listAlgorithms } from "./earthEngine";
-import { isProviderSideStatus } from "./publicData";
+import { isProviderSideError, isProviderSideStatus } from "./publicData";
 
 interface CheckResult {
   name: string;
@@ -234,7 +234,7 @@ export async function runSystemChecks(env: Env, opts: SystemCheckOptions = {}): 
         const json = (await res.json()) as { elements?: unknown[] };
         return { message: `ok (${json.elements?.length ?? 0}件 / ${new URL(endpoint).host})` };
       } catch (err) {
-        allBusy = false;
+        if (!isProviderSideError(err)) allBusy = false;
         failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
