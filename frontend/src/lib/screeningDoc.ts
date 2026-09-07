@@ -84,7 +84,14 @@ export function screeningToMarkdown(r: LeapReport): string {
   L.push("| データ源 | 取得範囲 | 取得状況 | 留意点 |");
   L.push("|---|---|---|---|");
   for (const p of r.publicData) {
-    const st = p.status === "ok" ? `取得成功${p.fetchedAt ? `（${new Date(p.fetchedAt).toLocaleString("ja-JP")}）` : ""}` : p.status === "failed" ? `**取得失敗**${p.error ? `（${p.error}）` : ""}` : "未取得";
+    const st =
+      p.status === "ok"
+        ? `取得成功${p.fetchedAt ? `（${new Date(p.fetchedAt).toLocaleString("ja-JP")}）` : ""}`
+        : p.status === "busy"
+          ? "提供元が混雑のため未取得"
+          : p.status === "failed"
+            ? `**取得失敗**${p.error ? `（${p.error}）` : ""}`
+            : "未取得";
     L.push(`| ${p.label} | ${p.covers.replace(/\|/g, "／")} | ${st} | ${p.caveat.replace(/\|/g, "／")} |`);
   }
   L.push("");

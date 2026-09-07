@@ -112,7 +112,9 @@ export interface PublicDataStatus {
   label: string;
   covers: string;
   caveat: string;
-  status: "ok" | "failed" | "not_fetched";
+  /** True where the source adds detail but no criterion depends on it. */
+  optional?: boolean;
+  status: "ok" | "failed" | "busy" | "not_fetched";
   error?: string;
   fetchedAt?: string | null;
 }
@@ -310,7 +312,14 @@ export async function buildLeapReport(env: Env, projectId: string) {
       label: src.label,
       covers: src.covers,
       caveat: src.caveat,
-      status: !row ? ("not_fetched" as const) : row.status === "ok" ? ("ok" as const) : ("failed" as const),
+      optional: "optional" in src ? Boolean(src.optional) : false,
+      status: !row
+        ? ("not_fetched" as const)
+        : row.status === "ok"
+          ? ("ok" as const)
+          : row.status === "busy"
+            ? ("busy" as const)
+            : ("failed" as const),
       error: row?.error ?? undefined,
       fetchedAt: row?.fetched_at ?? null,
     };

@@ -64,7 +64,8 @@ export interface PublicDataStatus {
   label: string;
   covers: string;
   caveat: string;
-  status: "ok" | "failed" | "not_fetched";
+  optional?: boolean;
+  status: "ok" | "failed" | "busy" | "not_fetched";
   error?: string;
   fetchedAt?: string | null;
 }

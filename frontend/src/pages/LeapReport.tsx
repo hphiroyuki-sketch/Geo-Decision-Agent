@@ -665,6 +665,7 @@ function PublicDataPanel({
 }) {
   const fetched = sources.filter((s) => s.status === "ok").length;
   const failed = sources.filter((s) => s.status === "failed").length;
+  const busy = sources.filter((s) => s.status === "busy").length;
   const none = sources.every((s) => s.status === "not_fetched");
 
   return (
@@ -680,6 +681,7 @@ function PublicDataPanel({
           <span className="text-[10px] text-slate-500">
             {fetched}/{sources.length} 件取得
             {failed > 0 && <span className="text-rose-600 font-medium"> ・{failed}件失敗</span>}
+            {busy > 0 && <span className="text-amber-700 font-medium"> ・{busy}件混雑中</span>}
           </span>
         )}
         <button
@@ -723,17 +725,32 @@ function PublicDataPanel({
               className={`text-[9.5px] border rounded px-1.5 py-0.5 shrink-0 mt-0.5 whitespace-nowrap ${
                 s.status === "ok"
                   ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                  : s.status === "failed"
-                    ? "bg-rose-50 text-rose-800 border-rose-300"
-                    : "bg-slate-100 text-slate-500 border-slate-300"
+                  : s.status === "busy"
+                    ? "bg-amber-50 text-amber-800 border-amber-300"
+                    : s.status === "failed"
+                      ? "bg-rose-50 text-rose-800 border-rose-300"
+                      : "bg-slate-100 text-slate-500 border-slate-300"
               }`}
             >
-              {s.status === "ok" ? "取得成功" : s.status === "failed" ? "取得失敗" : "未取得"}
+              {s.status === "ok"
+                ? "取得成功"
+                : s.status === "busy"
+                  ? "提供元が混雑"
+                  : s.status === "failed"
+                    ? "取得失敗"
+                    : "未取得"}
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-[11px] font-medium">{s.label}</div>
               <div className="text-[10px] text-slate-500 leading-snug">{s.covers}</div>
               <div className="text-[10px] text-slate-500 leading-snug mt-0.5">※ {s.caveat}</div>
+              {s.status === "busy" && (
+                <div className="text-[10px] text-amber-800 mt-0.5">
+                  提供元（ボランティア運営）が混雑しており取得できませんでした。
+                  {s.optional && "この項目が無くても他の判定には影響しません。"}
+                  時間をおいて「再取得」をお試しください。
+                </div>
+              )}
               {s.status === "failed" && s.error && (
                 <div className="text-[10px] text-rose-700 mt-0.5">取得できませんでした（{s.error}）。再取得をお試しください。</div>
               )}

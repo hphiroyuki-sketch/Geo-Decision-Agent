@@ -32,10 +32,11 @@ async function readCache<T>(db: D1Database, source: string, lat: number, lng: nu
   const ageMs = Date.now() - new Date(row.fetched_at).getTime();
   // A failure is retried sooner than a success is refreshed: the outage that
   // caused it is usually shorter than the data's shelf life.
-  const maxAge = row.status === "failed" ? 60 * 60 * 1000 : maxAgeDays * 24 * 60 * 60 * 1000;
+  const maxAge =
+    row.status === "failed" || row.status === "busy" ? 60 * 60 * 1000 : maxAgeDays * 24 * 60 * 60 * 1000;
   if (ageMs > maxAge) return null;
   return {
-    status: row.status as "ok" | "failed" | "empty",
+    status: row.status as "ok" | "failed" | "busy" | "empty",
     error: row.error,
     fetchedAt: row.fetched_at,
     payload: row.payload_json ? (JSON.parse(row.payload_json) as T) : null,
@@ -204,9 +205,21 @@ export async function fetchProtectedAreas(
   lat: number,
   lng: number,
   radiusKm = 10,
-): Promise<{ status: "ok" | "failed"; data: ProtectedAreaResult | null; error?: string; fetchedAt: string }> {
+): Promise<{
+  status: "ok" | "failed" | "busy";
+  data: ProtectedAreaResult | null;
+  error?: string;
+  fetchedAt: string;
+}> {
   const cached = await readCache<ProtectedAreaResult>(env.DB, "osm_protected", lat, lng);
-  if (cached) return { status: cached.status === "failed" ? "failed" : "ok", data: cached.payload, error: cached.error ?? undefined, fetchedAt: cached.fetchedAt };
+  if (cached) {
+    return {
+      status: cached.status === "ok" ? "ok" : cached.status === "busy" ? "busy" : "failed",
+      data: cached.payload,
+      error: cached.error ?? undefined,
+      fetchedAt: cached.fetchedAt,
+    };
+  }
 
   const r = Math.round(radiusKm * 1000);
   // `out center` returns one representative point per way/relation, which is
@@ -222,6 +235,7 @@ export async function fetchProtectedAreas(
       elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
     } | null = null;
     const failures: string[] = [];
+    let rateLimited = false;
 
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
@@ -232,6 +246,12 @@ export async function fetchProtectedAreas(
           signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) {
+          // Overpass instances rate-limit per source IP, and this Worker shares
+          // Cloudflare's egress addresses with everything else on the platform,
+          // so 429 is a routine condition rather than a fault. Recording it as a
+          // failure would put "取得失敗" in a client document for a source that
+          // is merely busy.
+          if (res.status === 429 || res.status === 504) rateLimited = true;
           failures.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
           continue;
         }
@@ -241,7 +261,12 @@ export async function fetchProtectedAreas(
         failures.push(`${new URL(endpoint).host}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    if (!json) throw new Error(failures.join(" / "));
+    if (!json) {
+      const message = failures.join(" / ");
+      const status = rateLimited ? "busy" : "failed";
+      await writeCache(env.DB, "osm_protected", lat, lng, status, null, message);
+      return { status, data: null, error: message, fetchedAt: new Date().toISOString() };
+    }
 
     const areas = (json.elements ?? [])
       .map((e) => {
@@ -405,6 +430,7 @@ export const PUBLIC_DATA_SOURCES = [
   {
     key: "gbif",
     label: "GBIF（地球規模生物多様性情報機構）",
+    optional: false,
     covers: "半径3km以内の生物種の記録・IUCN絶滅危惧カテゴリ",
     caveat: "研究者・市民による観察記録の集積です。記録が無いことは、生息していないことを意味しません。",
   },
@@ -412,11 +438,14 @@ export const PUBLIC_DATA_SOURCES = [
     key: "osm_protected",
     label: "OpenStreetMap（保護区域）",
     covers: "半径10km以内の国立・国定公園、保護地域、自然保護区",
-    caveat: "市民参加型データのため参考値です。正式な指定範囲は所管行政庁でご確認ください。",
+    caveat:
+      "市民参加型データのため参考値です。正式な指定範囲は所管行政庁でご確認ください。提供元はボランティア運営のため混雑時は取得できないことがありますが、その場合も他の判定には影響しません。",
+    optional: true,
   },
   {
     key: "gsi_hazard",
     label: "国土地理院 ハザードマップポータルサイト",
+    optional: false,
     covers: "洪水浸水想定・高潮・津波・土砂災害警戒区域（急傾斜地／土石流／地すべり）",
     caveat: "タイル単位（約600m四方）での該当有無です。地点そのものが区域内にあるかは、重ねるハザードマップでご確認ください。",
   },
