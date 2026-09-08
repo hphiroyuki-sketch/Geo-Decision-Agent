@@ -1,3 +1,4 @@
+import DisclosureWorkspace from "./pages/DisclosureWorkspace";
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { RefreshCw, WifiOff } from "lucide-react";
@@ -98,6 +99,7 @@ export default function App() {
         <Route path="/projects/:id/report" element={<DecisionReport />} />
         <Route path="/projects/:id/field" element={<FieldSurvey />} />
         <Route path="/projects/:id/mesh" element={<MeshView />} />
+        <Route path="/projects/:id/disclosure" element={<DisclosureWorkspace />} />
         <Route path="/projects/:id/leap" element={<LeapReport />} />
         <Route path="/projects/:id/recovery" element={<RecoveryPlan />} />
         <Route path="/admin" element={<Admin />} />

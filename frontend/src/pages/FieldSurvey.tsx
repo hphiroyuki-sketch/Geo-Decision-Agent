@@ -98,7 +98,7 @@ export default function FieldSurvey() {
 
   const mapMarkers = useMemo(() => [
     ...targets.map((t, i) => ({ lat: t.lat, lng: t.lng, label: `調査候補 ${i + 1}: ${CLASS_LABEL[t.cellClass] ?? t.cellClass}`, color: t.priority === "high" ? "#b3432b" : "#c98a1b" })),
-    ...records.map(r => ({ lat: r.lat, lng: r.lng, label: `${r.demo ? "デモ記録" : r.source === "map_pin" ? "地図で指定した基準点" : "現地記録"}: ${r.species_guess ?? "種未記入"}（${r.review_status === "confirmed" ? "確認済み" : "未確認"}）`, color: "#2563eb" })),
+    ...records.map(r => ({ recordId: r.id, lat: r.lat, lng: r.lng, label: `${r.demo ? "デモ記録" : r.source === "map_pin" ? "地図で指定した基準点" : "現地記録"}: ${r.species_guess ?? "種未記入"}（${r.review_status === "confirmed" ? "確認済み" : "未確認"}）`, color: "#2563eb" })),
     ...(coords ? [{lat: coords.lat, lng: coords.lng, label: "入力中の記録位置", color: "#ffffff"}] : []),
   ], [targets, records, coords]);
   const mapBounds = useMemo((): [[number, number], [number, number]] | null => {

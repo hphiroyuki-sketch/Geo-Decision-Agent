@@ -120,3 +120,9 @@ fieldRecordRoutes.get("/field-records/:id/photo", async (c) => {
     },
   });
 });
+
+fieldRecordRoutes.get("/field-records/:id", async (c) => {
+  const record = await c.env.DB.prepare(`SELECT fr.*, u.name AS observer_name FROM field_records fr
+    JOIN users u ON u.id = fr.observer_id WHERE fr.id = ?`).bind(c.req.param("id")).first();
+  return record ? c.json({ record }) : c.json({ error: "記録が見つかりません。" }, 404);
+});

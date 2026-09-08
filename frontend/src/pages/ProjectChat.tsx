@@ -1,3 +1,5 @@
+import type { ObservationRecord } from "../components/OrganismCard";
+import ChatMarkdown from "../components/ChatMarkdown";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -86,7 +88,7 @@ export default function ProjectChat() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [fieldRecords, setFieldRecords] = useState<{ lat: number; lng: number; species_guess: string | null }[]>([]);
+  const [fieldRecords, setFieldRecords] = useState<ObservationRecord[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [plan, setPlan] = useState<AgentStep[] | null>(null);
@@ -113,7 +115,7 @@ export default function ProjectChat() {
       setMessages(msgs.messages);
       const cand = await api.get<{ candidates: Candidate[] }>(`/projects/${id}/candidates`);
       setCandidates(cand.candidates);
-      const field = await api.get<{ records: { lat: number; lng: number; species_guess: string | null }[] }>(
+      const field = await api.get<{ records: ObservationRecord[] }>(
         `/projects/${id}/field-records`,
       );
       setFieldRecords(field.records);
@@ -215,7 +217,8 @@ export default function ProjectChat() {
     ...fieldRecords.map((f) => ({
       lat: f.lat,
       lng: f.lng,
-      label: `現地記録: ${f.species_guess ?? "種未記入"}`,
+      recordId: f.id,
+      label: `${f.demo ? "デモ記録" : f.source === "map_pin" ? "地図指定" : "現地記録"}: ${f.species_guess ?? "種未記入"}`,
       color: "#2563eb",
     })),
   ];
@@ -293,13 +296,13 @@ export default function ProjectChat() {
                 </span>
               )}
               <div
-                className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] whitespace-pre-wrap leading-relaxed ${
+                className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] min-w-0 leading-relaxed ${
                   m.role === "user"
                     ? "bg-sky-50 border border-sky-100 text-slate-800"
                     : "bg-slate-50 border border-slate-100 text-slate-800"
                 }`}
               >
-                {m.content || (sending && m.role === "assistant" ? "…" : "")}
+                {m.role === "assistant" ? <ChatMarkdown content={m.content || (sending ? "…" : "")} /> : <div className="whitespace-pre-wrap">{m.content}</div>}
               </div>
             </div>
           ))}
@@ -331,7 +334,7 @@ export default function ProjectChat() {
             sources={[
               { id: "ae", label: "AlphaEarth", sub: "2024", icon: "globe" },
               { id: "s2", label: "Sentinel-2", icon: "satellite" },
-              { id: "photo", label: "現地写真", sub: `${fieldRecords.length}件`, icon: "photo", active: fieldRecords.length > 0 },
+              { id: "photo", label: "登録記録", sub: `${fieldRecords.length}件`, icon: "photo", active: fieldRecords.length > 0 },
             ]}
           />
         </div>
@@ -398,7 +401,7 @@ export default function ProjectChat() {
             labelsVisible={controls.labelsVisible}
             terrain3d={controls.terrain3d}
             terrainExaggeration={controls.exaggeration}
-            globe={false}
+            globe={controls.terrain3d}
             showUserLocation
           />
         </div>
@@ -466,6 +469,7 @@ export default function ProjectChat() {
         </div>
 
         <div className="p-3 border-t border-slate-100 grid grid-cols-2 gap-2">
+          <Link to={`/projects/${id}/disclosure`} className="col-span-2 rounded-lg bg-emerald-700 text-white text-center py-3 text-sm font-semibold">開示・申請準備 →</Link>
           <Link
             to={`/projects/${id}/field`}
             className="flex items-center justify-center gap-1.5 text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2.5"

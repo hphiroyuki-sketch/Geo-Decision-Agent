@@ -497,6 +497,7 @@ export default function MeshView() {
       : (context?.confirmedRecords ?? []).map((r) => ({
           lat: r.lat,
           lng: r.lng,
+          recordId: r.id,
           label:
             r.source === "map_pin"
               ? `基準地点（地図で指定・現地未確認）`
@@ -1112,7 +1113,7 @@ export default function MeshView() {
           fitRequest={fitRequest}
           selectedCellId={selected?.cellId}
           maxFitZoom={18}
-          globe={false}
+          globe={controls.terrain3d}
           showUserLocation
           onCellClick={setSelected}
           onOverlayStatus={setOverlayOk}

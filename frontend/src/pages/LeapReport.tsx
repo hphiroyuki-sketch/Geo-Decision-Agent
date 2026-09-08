@@ -155,6 +155,7 @@ export default function LeapReport() {
 
   return (
     <div className="bg-slate-200 min-h-full print:bg-white">
+      <div className="print-hide bg-emerald-800 text-white px-4 py-3 text-sm text-center">この報告をもとに、企業情報と根拠を整理する · <Link to={`/projects/${id}/disclosure`} className="underline font-semibold">開示・申請準備へ →</Link></div>
       {/* Toolbar - never printed. */}
       <div className="print-hide sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-2.5">
         <div className="max-w-[210mm] mx-auto flex flex-wrap items-center gap-2">

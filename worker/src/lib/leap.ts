@@ -216,14 +216,14 @@ export async function buildLeapReport(env: Env, projectId: string) {
     : [];
 
   const { results: fieldStats } = await env.DB.prepare(
-    `SELECT review_status, source, COUNT(*) AS n FROM field_records WHERE project_id = ? GROUP BY review_status, source`,
+    `SELECT review_status, source, COUNT(*) AS n FROM field_records WHERE project_id = ? AND demo = 0 GROUP BY review_status, source`,
   )
     .bind(projectId)
     .all<{ review_status: string; source: string; n: number }>();
 
   const { results: species } = await env.DB.prepare(
     `SELECT DISTINCT species_guess FROM field_records
-     WHERE project_id = ? AND review_status = 'confirmed' AND source = 'field'
+     WHERE project_id = ? AND review_status = 'confirmed' AND source = 'field' AND demo = 0
        AND species_guess IS NOT NULL LIMIT 20`,
   )
     .bind(projectId)
@@ -349,12 +349,12 @@ export async function buildLeapReport(env: Env, projectId: string) {
       label: `${project.name}（メッシュ解析範囲）`,
       lat: mesh.center_lat,
       lng: mesh.center_lng,
-      verdict: changed > 0 ? "watch" : priority > 0 ? "attention" : "clear",
+      verdict: confirmedField === 0 ? "insufficient" : "watch",
       reason:
         changed > 0
           ? `前年から大きく変化した区域を ${changed} 件（${areaOf("changed").toFixed(2)}ha）検出。原因は衛星では判定できないため現地確認が必要。`
           : priority > 0
-            ? `確認済み環境と高い類似度を示す区域を ${priority} 件（${areaOf("priority_a").toFixed(2)}ha）検出。改変を避ける配慮が必要。`
+            ? `比較基準と高い環境類似度を示す区域を ${priority} 件（${areaOf("priority_a").toFixed(2)}ha）検出。生態学的な価値と事業影響は現地で別途確認が必要。`
             : `${sampled.toLocaleString()} マスを取得したが、しきい値を超える区域は検出されていない。`,
       score: null,
       evidence: [
@@ -369,12 +369,12 @@ export async function buildLeapReport(env: Env, projectId: string) {
       label: c.label,
       lat: c.lat,
       lng: c.lng,
-      verdict: c.confidence === "低" ? "insufficient" : c.score >= 75 ? "clear" : c.score >= 55 ? "watch" : "attention",
+      verdict: "insufficient",
       reason:
         c.confidence === "低"
           ? `信頼度「低」。判断の裏付けが不足しており、この結果だけで立地を決めることはできない。`
           : `総合スコア ${c.score}／推奨アクション: ${c.recommended_action}`,
-      score: c.score,
+      score: null,
       evidence: (c.evidence_basis ?? "").split(",").filter(Boolean),
     });
   }
@@ -413,17 +413,10 @@ export async function buildLeapReport(env: Env, projectId: string) {
     {
       key: "high_integrity",
       title: "生態系の完全性が高い地域",
-      assessable: hasMeshResult && (mesh?.reference_points ?? 0) > 0,
-      result:
-        hasMeshResult && (mesh?.reference_points ?? 0) > 0
-          ? countOf("priority_a") > 0
-            ? `該当あり：${countOf("priority_a")} 区域（${areaOf("priority_a").toFixed(2)}ha）が判定基準 ${PRIORITY_A_THRESHOLD} を超過`
-            : `該当なし：判定基準 ${PRIORITY_A_THRESHOLD} を超える区域は検出されず（最大類似度 ${meshStats?.sim_max?.toFixed(2) ?? "—"}）`
-          : "判定不可",
-      requires:
-        hasMeshResult && (mesh?.reference_points ?? 0) > 0
-          ? "本判定は基準地点との相対的な類似度によるものです。絶対的な生態系完全性指標（例：Biodiversity Intactness Index）との照合は未実施です。"
-          : "基準地点の設定と10mメッシュ解析が必要です。",
+      assessable: false,
+      proxy: hasMeshResult,
+      result: hasMeshResult ? `参考：環境類似度 ${meshStats?.sim_min?.toFixed(2) ?? "—"}〜${meshStats?.sim_max?.toFixed(2) ?? "—"}。完全性は未判定` : "判定不可",
+      requires: "環境類似度は生態系完全性を測る指標ではありません。比較基準にはデモや地図指定が含まれ得ます。生態系状態の専門家評価と独立した指標が必要です。",
       source:
         hasMeshResult && (mesh?.reference_points ?? 0) > 0
           ? "自システムの10mメッシュ解析（Google Satellite Embedding V1 Annual）"
@@ -433,17 +426,10 @@ export async function buildLeapReport(env: Env, projectId: string) {
     {
       key: "rapid_decline",
       title: "生態系の完全性が急速に低下している地域",
-      assessable: hasMeshResult && mesh?.detect_change === 1,
-      result:
-        hasMeshResult && mesh?.detect_change === 1
-          ? countOf("changed") > 0
-            ? `該当あり：${countOf("changed")} 区域（${areaOf("changed").toFixed(2)}ha）が判定基準 ${CHANGED_THRESHOLD} を超過`
-            : `該当なし：判定基準 ${CHANGED_THRESHOLD} を超える変化は検出されず（最大変化スコア ${meshStats?.chg_max?.toFixed(3) ?? "—"}）`
-          : "判定不可",
-      requires:
-        hasMeshResult && mesh?.detect_change === 1
-          ? "前年比1年分の比較です。長期傾向の判定には複数年の解析が必要です。変化の原因は衛星では特定できません。"
-          : "「前年との変化も調べる」を有効にした10mメッシュ解析が必要です。",
+      assessable: false,
+      proxy: hasMeshResult && mesh?.detect_change === 1,
+      result: hasMeshResult && mesh?.detect_change === 1 ? `参考：最大変化スコア ${meshStats?.chg_max?.toFixed(3) ?? "—"}。完全性の低下は未判定` : "判定不可",
+      requires: "衛星特徴の変化だけでは、生態系の悪化・回復やその原因を判定できません。現地記録と複数年の状態評価を組み合わせてください。",
       source:
         hasMeshResult && mesh?.detect_change === 1
           ? "自システムの10mメッシュ解析（Google Satellite Embedding V1 Annual）"
@@ -787,7 +773,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
       label: "機会（回復による価値創出）",
       value:
         countOf("similar") > 0
-          ? `回復候補区域 ${areaOf("similar").toFixed(2)}ha は施策の費用対効果が高い可能性があり、代償措置の候補にもなり得ます。`
+          ? `回復候補区域 ${areaOf("similar").toFixed(2)}ha は現地調査の候補です。回復効果・費用対効果・代償措置への適合性は未評価です。`
           : "回復候補区域は検出されていません。",
       basis: hasMeshResult ? "measured" : "missing",
     },
@@ -977,7 +963,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
         label: "開示媒体",
         value: "未設定",
         basis: "missing",
-        note: "日本ではSSBJ基準が2027年3月期から段階適用（2026年3月期から任意適用）。現時点で確定しているのは気候関連であり、自然関連は今後の動向確認が必要です。",
+        note: "開示媒体と適用される基準・時期は、企業の状況と最新の公式情報に基づいて確認してください。",
       },
     ],
     gaps: ["開示媒体と時期の決定は、開示規制の適用時期を踏まえて計画してください。"],

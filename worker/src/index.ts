@@ -1,3 +1,4 @@
+import { disclosureRoutes } from "./routes/disclosure";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import type { Env, AuthUser } from "./types";
@@ -26,6 +27,7 @@ app.use("/api/*", requireWriteAccess);
 
 app.use("/api/projects/*", requireAuth);
 app.route("/api/projects", projectRoutes);
+app.route("/api", disclosureRoutes);
 
 app.use("/api/field-records/*", requireAuth);
 app.route("/api", fieldRecordRoutes);

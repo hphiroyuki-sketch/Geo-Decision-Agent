@@ -1,0 +1,92 @@
+{
+  "スギ": {
+    "scientificName": "Cryptomeria japonica",
+    "order": "Pinales",
+    "family": "Cupressaceae",
+    "genus": "Cryptomeria",
+    "taxonomySource": "https://www.gbif.org/species/5284237",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1a/Cryptomeria_japonica_-_foliage_%2831180139201%29.jpg/960px-Cryptomeria_japonica_-_foliage_%2831180139201%29.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Cryptomeria_japonica_-_foliage_(31180139201).jpg",
+      "author": "S. Rae from Scotland, UK",
+      "license": "CC BY 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.0"
+    }
+  },
+  "ブナ": {
+    "scientificName": "Fagus crenata",
+    "order": "Fagales",
+    "family": "Fagaceae",
+    "genus": "Fagus",
+    "taxonomySource": "https://www.gbif.org/species/2882300",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/79/Bijinbayashi_means_beautiful_forest.jpg/960px-Bijinbayashi_means_beautiful_forest.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Bijinbayashi_means_beautiful_forest.jpg",
+      "author": "Nihongo1234",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0"
+    }
+  },
+  "ミズナラ": {
+    "scientificName": "Quercus crispula",
+    "order": "Fagales",
+    "family": "Fagaceae",
+    "genus": "Quercus",
+    "taxonomySource": "https://www.gbif.org/species/8084643",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/12/Quercus_mongolica_var_gosseserrata.JPG",
+      "source": "https://commons.wikimedia.org/wiki/File:Quercus_mongolica_var_gosseserrata.JPG",
+      "author": "No machine-readable author provided. Inti-sol~commonswiki assumed (based on copyright claims).",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "http://creativecommons.org/licenses/by-sa/3.0/"
+    }
+  },
+  "ダケカンバ": {
+    "scientificName": "Betula ermanii",
+    "order": "Fagales",
+    "family": "Betulaceae",
+    "genus": "Betula",
+    "taxonomySource": "https://www.gbif.org/species/5332231",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/63/Betula_ermanii_%28200612%29.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Betula_ermanii_(200612).jpg",
+      "author": "E-190",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "http://creativecommons.org/licenses/by-sa/3.0/"
+    }
+  },
+  "クマイザサ": {
+    "scientificName": "Sasa senanensis",
+    "order": "Poales",
+    "family": "Poaceae",
+    "genus": "Sasa",
+    "taxonomySource": "https://www.gbif.org/species/4129057",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/70/Sasa_senanensis.jpg/960px-Sasa_senanensis.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Sasa_senanensis.jpg",
+      "author": "Leonora (Ellie) Enking",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0"
+    }
+  },
+  "トチノキ": {
+    "scientificName": "Aesculus turbinata",
+    "order": "Sapindales",
+    "family": "Sapindaceae",
+    "genus": "Aesculus",
+    "taxonomySource": "https://www.gbif.org/species/3189819",
+    "retrievedAt": "2026-09-09",
+    "image": {
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4e/Aesculus_turbinata%2C_Barge_walk.jpg/960px-Aesculus_turbinata%2C_Barge_walk.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:Aesculus_turbinata,_Barge_walk.jpg",
+      "author": "Jonathan Cardy",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0"
+    }
+  }
+}

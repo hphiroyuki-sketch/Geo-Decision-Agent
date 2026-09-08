@@ -183,3 +183,43 @@ input[type="range"]::-webkit-slider-thumb {
     background: #fff !important;
   }
 }
+
+/* Popups must not inherit pale text from the dark map container. */
+.maplibregl-popup-content { color: #182b3b; background: #fff; border-radius: 14px; padding: 16px; font: 13px/1.65 -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; box-shadow: 0 12px 40px #0005; }
+.maplibregl-popup-close-button { color: #334155; font-size: 24px; width: 32px; height: 32px; border-radius: 8px; z-index: 2; background: #fffe; }
+.maplibregl-popup-close-button:focus-visible { outline: 2px solid #047857; }
+.chat-markdown { overflow-wrap: anywhere; line-height: 1.85; }
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p { margin: .65em 0; }
+.chat-markdown strong { font-weight: 700; color: #102d3c; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 { font-size: 1.08em; font-weight: 700; margin: 1.2em 0 .5em; }
+.chat-markdown ul { list-style: disc; padding-left: 1.5em; margin: .6em 0; }
+.chat-markdown ol { list-style: decimal; padding-left: 1.5em; margin: .6em 0; }
+.chat-markdown li { margin: .3em 0; }
+.chat-markdown a { color: #036b87; text-decoration: underline; text-underline-offset: 3px; }
+.chat-markdown blockquote { border-left: 3px solid #60a58a; padding: .3em 1em; background: #edf5f1; margin: .8em 0; }
+.chat-markdown code { background: #e4eaf0; border-radius: 4px; padding: .1em .35em; font-size: .9em; }
+.chat-markdown pre { overflow: auto; background: #132635; color: #e9f0f5; padding: 1em; border-radius: 10px; margin: .8em 0; }
+.chat-markdown pre code { background: transparent; padding: 0; }
+.markdown-table { overflow-x: auto; margin: .8em 0; }
+.chat-markdown table { border-collapse: collapse; min-width: 100%; }
+.chat-markdown th, .chat-markdown td { padding: .5em .75em; border: 1px solid #cbd5e1; text-align: left; }
+.chat-markdown th { background: #e8f0ee; font-weight: 600; }
+
+.organism-popup .maplibregl-popup-content { padding: 0; overflow: hidden; }
+.organism-card { width: 320px; max-width: calc(100vw - 56px); max-height: min(600px, 65vh); overflow-y: auto; color: #182b3b; }
+.organism-card figure { margin: 0; }
+.organism-card img, .organism-card video { width: 100%; height: 170px; object-fit: cover; background: #e8eee9; }
+.organism-card figcaption { padding: 6px 12px; background: #eef4f0; color: #375148; font-size: 10px; }
+.organism-card a { color: #076a53; text-decoration: underline; }
+.organism-body { padding: 12px 16px 16px; }
+.organism-badge { font-size: 10px; background: #e9f0f6; color: #274354; border-radius: 4px; padding: 3px 6px; }
+.organism-card h3 { margin: 7px 0 0; font-size: 22px; font-weight: 700; }
+.organism-latin { font-style: italic; color: #4a625d; margin-bottom: 12px; }
+.organism-card dt { font-size: 10px; color: #526575; margin-top: 8px; }
+.organism-card dd { font-size: 12px; font-weight: 500; }
+.organism-card small { display: block; color: #536575; font-weight: 400; }
+.organism-note { font-size: 11px; margin-top: 12px; color: #536575; }
+.organism-detail { display: block; margin-top: 12px; font-weight: 600; }
+.organism-no-photo { padding: 28px 12px; background: #eaf1ed; text-align: center; color: #4a625d; }

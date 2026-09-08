@@ -1,3 +1,5 @@
+import { createRoot, type Root } from "react-dom/client";
+import OrganismCard from "./OrganismCard";
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
@@ -12,6 +14,7 @@ export interface MapMarker {
   lng: number;
   label: string;
   color?: string;
+  recordId?: string;
 }
 
 export type Basemap = "satellite" | "streets";
@@ -396,24 +399,6 @@ function ensureTerrainSource(map: maplibregl.Map): boolean {
       return false;
     }
   }
-  if (!map.getLayer("sky")) {
-    try {
-      // Added once and never toggled: a sky layer has no layout properties, and
-      // setLayoutProperty on one throws.
-      map.addLayer({
-        id: "sky",
-        type: "sky",
-        paint: {
-          "sky-color": "#8fb8de",
-          "sky-horizon-blend": 0.5,
-          "horizon-color": "#dfeaf5",
-          "horizon-fog-blend": 0.6,
-        },
-      } as unknown as maplibregl.LayerSpecification);
-    } catch {
-      // A renderer without sky support still gets terrain relief.
-    }
-  }
   return true;
 }
 
@@ -615,9 +600,10 @@ export default function MapView({
     if (!map) return;
     return whenStyleReady(map, () => {
       try {
-        (map as unknown as { setProjection: (p: unknown) => void }).setProjection({
+        map.setProjection({
           type: globe ? "globe" : "mercator",
         });
+        map.setSky({ "sky-color": "#071321", "horizon-color": "#87b8db", "sky-horizon-blend": 0.5, "atmosphere-blend": globe ? 0.85 : 0 });
       } catch (err) {
         // An older renderer just stays flat; nothing else depends on this.
         console.error("projection unavailable", err);
@@ -681,17 +667,27 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    return whenStyleReady(map, () => {
-      if (terrain3d) {
-        if (!ensureTerrainSource(map)) return;
-        map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
-        if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
-      } else {
-        map.setTerrain(null);
-        if (map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+    let terrainActive = false;
+    const sync = () => {
+      // Global DEM tessellation produces seams at globe scale. Use the sphere
+      // there and enable terrain only once the user reaches a regional view.
+      const enable = terrain3d && map.getZoom() >= 9;
+      if (enable !== terrainActive) {
+        terrainActive = enable;
+        if (enable && ensureTerrainSource(map)) map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
+        else map.setTerrain(null);
       }
+      if (globe && map.getZoom() < 6 && map.getPitch() > 0) map.setPitch(0);
+    };
+    const cancel = whenStyleReady(map, () => {
+      map.setTerrain(null);
+      sync();
+      if (terrain3d && map.getZoom() >= 9 && map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
+      if (!terrain3d && map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+      map.on("zoom", sync);
     });
-  }, [terrain3d, terrainExaggeration]);
+    return () => { cancel(); map.off("zoom", sync); };
+  }, [terrain3d, terrainExaggeration, globe]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -712,6 +708,7 @@ export default function MapView({
     if (!map) return;
     markerRefs.current.forEach((m) => m.remove());
     markerRefs.current = [];
+    const cleanup: (() => void)[] = [];
     for (const m of markers) {
       const el = document.createElement("div");
       el.style.background = m.color ?? "#1f7a4d";
@@ -720,12 +717,29 @@ export default function MapView({
       el.style.borderRadius = "50%";
       el.style.border = "2px solid white";
       el.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.2)";
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", m.label);
+      el.tabIndex = 0;
+      const popup = new maplibregl.Popup({ offset: 12, maxWidth: m.recordId ? "340px" : "280px", className: m.recordId ? "organism-popup" : "" });
+      let root: Root | null = null;
+      if (m.recordId) {
+        popup.on("open", () => {
+          const content = document.createElement("div");
+          popup.setDOMContent(content);
+          root = createRoot(content);
+          root.render(<OrganismCard recordId={m.recordId!} />);
+        });
+        popup.on("close", () => { root?.unmount(); root = null; });
+      } else popup.setText(m.label);
+      cleanup.push(() => { popup.remove(); root?.unmount(); root = null; });
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([m.lng, m.lat])
-        .setPopup(new maplibregl.Popup({ offset: 12 }).setText(m.label))
+        .setPopup(popup)
         .addTo(map);
+      el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); marker.togglePopup(); } });
       markerRefs.current.push(marker);
     }
+    return () => { cleanup.forEach(fn => fn()); markerRefs.current.forEach(m => m.remove()); };
   }, [markers]);
 
   return <div ref={containerRef} className={className ?? "w-full h-full"} />;
