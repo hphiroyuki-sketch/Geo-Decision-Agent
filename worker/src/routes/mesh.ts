@@ -270,10 +270,11 @@ meshRoutes.post("/meshes/:meshId/analyze", async (c) => {
         now,
       ),
     );
-    for (const cellId of hotspot.cellIds) {
-      statements.push(
-        c.env.DB.prepare("UPDATE mesh_cells SET hotspot_id = ? WHERE id = ?").bind(hotspotId, cellId),
-      );
+    // D1 allows 100 bound parameters per statement. Update a patch in chunks
+    // rather than issuing thousands of individual statements for a 10m grid.
+    for (let i = 0; i < hotspot.cellIds.length; i += 80) {
+      const ids = hotspot.cellIds.slice(i, i + 80);
+      statements.push(c.env.DB.prepare(`UPDATE mesh_cells SET hotspot_id = ? WHERE id IN (${ids.map(() => "?").join(",")})`).bind(hotspotId, ...ids));
     }
     for (const action of actions) {
       statements.push(

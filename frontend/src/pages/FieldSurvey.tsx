@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Camera, MapPin, CheckCircle2, XCircle, Clock, Loader2, Navigation, Target } from "lucide-react";
 import { api } from "../lib/api";
+import MapView from "../components/MapView";
 import { Hint, EmptyState } from "../components/Explain";
 
 interface FieldRecordRow {
@@ -16,6 +17,8 @@ interface FieldRecordRow {
   captured_at: string;
   review_status: string;
   observer_name: string;
+  demo?: number;
+  source?: string;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -56,6 +59,8 @@ const CLASS_LABEL: Record<string, string> = {
 export default function FieldSurvey() {
   const { id } = useParams<{ id: string }>();
   const [records, setRecords] = useState<FieldRecordRow[]>([]);
+  const [mapMesh, setMapMesh] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [targets, setTargets] = useState<SurveyTarget[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -72,7 +77,7 @@ export default function FieldSurvey() {
 
   const load = () => {
     if (!id) return;
-    api.get<{ records: FieldRecordRow[] }>(`/projects/${id}/field-records`).then((r) => setRecords(r.records));
+    api.get<{ records: FieldRecordRow[] }>(`/projects/${id}/field-records`).then((r) => setRecords(r.records)).catch((err) => setDataError(String(err)));
   };
 
   useEffect(load, [id]);
@@ -82,8 +87,25 @@ export default function FieldSurvey() {
     api
       .get<{ targets: SurveyTarget[] }>(`/projects/${id}/survey-targets`)
       .then((r) => setTargets(r.targets))
-      .catch(() => setTargets([]));
+      .catch((err) => setDataError(String(err)));
+    api.get<{ meshes: { id: string; sampled_cells: number }[] }>(`/projects/${id}/meshes`).then(async list => {
+      const latest = list.meshes.find(m => m.sampled_cells > 0);
+      if (!latest) return;
+      const mesh = await api.get<{geojson: GeoJSON.FeatureCollection}>(`/meshes/${latest.id}`);
+      setMapMesh(mesh.geojson);
+    }).catch((err) => setDataError(String(err)));
   }, [id]);
+
+  const mapMarkers = useMemo(() => [
+    ...targets.map((t, i) => ({ lat: t.lat, lng: t.lng, label: `調査候補 ${i + 1}: ${CLASS_LABEL[t.cellClass] ?? t.cellClass}`, color: t.priority === "high" ? "#b3432b" : "#c98a1b" })),
+    ...records.map(r => ({ lat: r.lat, lng: r.lng, label: `${r.demo ? "デモ記録" : r.source === "map_pin" ? "地図で指定した基準点" : "現地記録"}: ${r.species_guess ?? "種未記入"}（${r.review_status === "confirmed" ? "確認済み" : "未確認"}）`, color: "#2563eb" })),
+    ...(coords ? [{lat: coords.lat, lng: coords.lng, label: "入力中の記録位置", color: "#ffffff"}] : []),
+  ], [targets, records, coords]);
+  const mapBounds = useMemo((): [[number, number], [number, number]] | null => {
+    if (coords || !mapMarkers.length) return null;
+    return [[Math.min(...mapMarkers.map(m => m.lng)) - .001, Math.min(...mapMarkers.map(m => m.lat)) - .001],
+      [Math.max(...mapMarkers.map(m => m.lng)) + .001, Math.max(...mapMarkers.map(m => m.lat)) + .001]];
+  }, [coords, mapMarkers]);
 
   const captureLocation = () => {
     setLocationError(null);
@@ -179,6 +201,12 @@ export default function FieldSurvey() {
         </div>
       </div>
 
+      {dataError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800">データの読み込みに失敗しました: {dataError}</p>}
+      {(mapMarkers.length > 0 || mapMesh) && <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="p-3"><h2 className="text-sm font-semibold">調査候補と現地記録を地図で確認</h2><p className="mt-1 text-xs text-slate-500">青: 登録記録（デモを含む） · 黄/赤: 調査候補 · 白: 入力中の位置。地点の記録前に実際の観測位置を確認してください。</p></div>
+        <div className="h-80"><MapView center={coords ? [coords.lat, coords.lng] : mapMarkers[0] ? [mapMarkers[0].lat, mapMarkers[0].lng] : [36.2, 138.2]} zoom={17} fitBounds={mapBounds} markers={mapMarkers} mesh={mapMesh} globe={false} showUserLocation /></div>
+      </section>}
+
       {targets.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
@@ -188,7 +216,7 @@ export default function FieldSurvey() {
             10mメッシュ解析が抽出した区域です。優先度の高い順に並んでいます。座標をタップすると地図アプリで開けます。
           </p>
           <div className="space-y-2">
-            {targets.slice(0, 5).map((t) => (
+            {targets.map((t) => (
               <div key={t.id} className={`border rounded-lg p-3 ${PRIORITY_STYLE[t.priority]}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="text-xs font-semibold text-slate-800">

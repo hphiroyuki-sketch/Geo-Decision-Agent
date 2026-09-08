@@ -180,6 +180,8 @@ export default function MeshView() {
   const [pins, setPins] = useState<{ lat: number; lng: number }[]>([]);
   const [pinBusy, setPinBusy] = useState(false);
   const cancelRef = useRef(false);
+  const [pauseRequested, setPauseRequested] = useState(false);
+  useEffect(() => () => { cancelRef.current = true; }, []);
 
   const activeMeshId = searchParams.get("mesh");
 
@@ -240,14 +242,14 @@ export default function MeshView() {
 
   const cellCount = Math.round(extentM / cellSizeM) ** 2;
   const overLimit = cellCount > (context?.maxCells ?? 2500);
-  const estimateSec = Math.ceil((cellCount / 16) * (detectChange ? 3 : 2));
+  const estimateSec = Math.ceil((cellCount / 16) * (detectChange ? 10 : 6));
 
   /** The run, shown as stages so a long wait reads as progress, not a hang. */
   const runSteps: AgentStep[] | null = useMemo(() => {
     if (!busy && !progress) return null;
     const sampling = progress ? progress.done / Math.max(1, progress.total) : 0;
     return [
-      { label: "解析範囲をグリッド化", detail: `${cellCount.toLocaleString()}マス（1マス${cellSizeM}m）`, status: "done" },
+      { label: "解析範囲をグリッド化", detail: `${(progress?.total ?? cellCount).toLocaleString()}マス（1マス${cellSizeM}m）`, status: "done" },
       {
         label: "衛星データを1マスずつ取得",
         detail: progress ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} マス取得済み` : "開始しています",
@@ -278,6 +280,7 @@ export default function MeshView() {
    */
   const runSampling = async (meshId: string, total: number, alreadySampled = 0) => {
     cancelRef.current = false;
+    setPauseRequested(false);
     let remaining = total - alreadySampled;
     let guard = 0;
     let consecutiveFailures = 0;
@@ -629,6 +632,7 @@ export default function MeshView() {
           <div className="p-4 border-b border-[var(--gda-ink-line)]">
             <div className="text-[11px] font-medium mb-2">解析を実行しています</div>
             <AgentSteps dark steps={runSteps} />
+            {busy && <button className="mt-2 rounded border border-white/20 px-3 py-1.5 text-xs" disabled={pauseRequested} onClick={() => { cancelRef.current = true; setPauseRequested(true); }}>{pauseRequested ? "現在の取得が終わり次第、一時停止します" : "取得を一時停止（結果は保存）"}</button>}
             {progress && (
               <div className="mt-2">
                 <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -970,7 +974,7 @@ export default function MeshView() {
                     )}
                   </>
                 ) : detail.pending > 0 ? (
-                  <> 解析が途中で止まっているためです。上の「続きから再開」で最後まで取得すると区域が抽出されます。</>
+                  <> 解析が途中で止まっているためです。上の「続きから再開」で最後まで取得して区域抽出を再評価できます。</>
                 ) : (
                   <>
                     {" "}
