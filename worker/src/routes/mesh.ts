@@ -73,6 +73,11 @@ meshRoutes.post("/projects/:id/meshes", async (c) => {
   const extentM = body.extentM ?? Number(await getSetting(c.env.DB, "mesh_extent_m", "200"));
   const detectChange = body.detectChange !== false;
 
+  if (![centerLat, centerLng, cellSizeM, extentM].every(Number.isFinite) ||
+      Math.abs(centerLat) > 80 || Math.abs(centerLng) > 180 ||
+      ![10, 20, 50].includes(cellSizeM) || extentM < cellSizeM || extentM % cellSizeM !== 0) {
+    return c.json({ error: "有効な座標と範囲を指定してください。セルは10・20・50m、範囲はセルサイズの整数倍です。" }, 400);
+  }
   const cellCount = Math.round(extentM / cellSizeM) ** 2;
   if (cellCount > MAX_CELLS) {
     // Refuse rather than silently coarsening: the caller asked for a specific
@@ -176,12 +181,25 @@ meshRoutes.post("/meshes/:meshId/sample", async (c) => {
   );
 
   if (outcome.remaining === 0) {
-    await c.env.DB.prepare("UPDATE meshes SET status = 'ready', completed_at = ? WHERE id = ?")
-      .bind(new Date().toISOString(), meshId)
+    const failures = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM mesh_cells WHERE mesh_id = ? AND status = 'failed'").bind(meshId).first<{ n: number }>();
+    await c.env.DB.prepare("UPDATE meshes SET status = ?, completed_at = ? WHERE id = ?")
+      .bind(failures?.n ? "partial" : "ready", failures?.n ? null : new Date().toISOString(), meshId)
       .run();
   }
 
   return c.json({ ...outcome, referencePoints: reference?.points.length ?? 0 });
+});
+
+/** Explicit retry: successes are immutable; failed cells are queued only once per user retry. */
+meshRoutes.post("/meshes/:meshId/retry", async (c) => {
+  const meshId = c.req.param("meshId");
+  const mesh = await c.env.DB.prepare("SELECT id FROM meshes WHERE id = ?").bind(meshId).first();
+  if (!mesh) return c.json({ error: "メッシュが見つかりません。" }, 404);
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE mesh_cells SET status = 'pending', error = NULL WHERE mesh_id = ? AND status = 'failed'").bind(meshId),
+    c.env.DB.prepare("UPDATE meshes SET status = 'sampling', completed_at = NULL WHERE id = ?").bind(meshId),
+  ]);
+  return c.json({ ok: true });
 });
 
 /** Recomputes hotspots and the recovery plan from the sampled cells. */
@@ -190,6 +208,12 @@ meshRoutes.post("/meshes/:meshId/analyze", async (c) => {
   const meshId = c.req.param("meshId");
   const mesh = await c.env.DB.prepare("SELECT * FROM meshes WHERE id = ?").bind(meshId).first<MeshRow>();
   if (!mesh) return c.json({ error: "メッシュが見つかりません。" }, 404);
+
+  // A regenerated plan must never erase work already assigned or reviewed.
+  const managed = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM recovery_actions WHERE mesh_id = ? AND (status <> 'proposed' OR owner_user_id IS NOT NULL OR due_date IS NOT NULL)",
+  ).bind(meshId).first<{ n: number }>();
+  if (managed?.n) return c.json({ error: "担当・期限・進捗を設定した回復計画を保護しています。再評価は新しいメッシュで実行してください。" }, 409);
 
   const { results: cells } = await c.env.DB.prepare(
     `SELECT id, row_idx, col_idx, center_lat, center_lng, reference_similarity, change_score, cell_class, field_records
@@ -310,6 +334,8 @@ meshRoutes.get("/meshes/:meshId", async (c) => {
     .bind(meshId)
     .all<{
       id: string;
+      row_idx: number;
+      col_idx: number;
       min_lat: number;
       min_lng: number;
       max_lat: number;
@@ -322,15 +348,17 @@ meshRoutes.get("/meshes/:meshId", async (c) => {
       hotspot_id: string | null;
     }>();
 
-  const features = cells
-    .filter((cell) => cell.status === "sampled")
-    .map((cell) => ({
+  const features = cells.map((cell) => ({
       type: "Feature" as const,
-      id: cell.id,
+      id: cell.row_idx * mesh.col_count + cell.col_idx,
       properties: {
-        cellClass: cell.cell_class,
-        label: CELL_CLASS_LABEL[(cell.cell_class ?? "unscored") as CellClass],
-        color: CELL_CLASS_COLOR[(cell.cell_class ?? "unscored") as CellClass],
+        cellId: cell.id,
+        status: cell.status,
+        lat: (cell.min_lat + cell.max_lat) / 2,
+        lng: (cell.min_lng + cell.max_lng) / 2,
+        cellClass: cell.cell_class ?? "unscored",
+        label: cell.status === "pending" ? "取得待ち" : cell.status === "failed" ? "取得失敗（再試行できます）" : CELL_CLASS_LABEL[(cell.cell_class ?? "unscored") as CellClass],
+        color: cell.status === "pending" ? "#475569" : cell.status === "failed" ? "#be7282" : CELL_CLASS_COLOR[(cell.cell_class ?? "unscored") as CellClass],
         // Nullable values for display...
         similarity: cell.reference_similarity,
         change: cell.change_score,
@@ -374,6 +402,12 @@ meshRoutes.get("/meshes/:meshId", async (c) => {
   return c.json({
     mesh,
     pending,
+    counts: {
+      total: cells.length,
+      sampled: cells.filter((cell) => cell.status === "sampled").length,
+      pending: cells.filter((cell) => cell.status === "pending").length,
+      failed: cells.filter((cell) => cell.status === "failed").length,
+    },
     geojson: { type: "FeatureCollection", features },
     hotspots,
     actions,

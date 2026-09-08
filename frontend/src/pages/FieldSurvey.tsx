@@ -63,7 +63,7 @@ export default function FieldSurvey() {
   const [speciesGuess, setSpeciesGuess] = useState("");
   const [taxonConfidence, setTaxonConfidence] = useState("中");
   const [notes, setNotes] = useState("");
-  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number | null } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [manualCoords, setManualCoords] = useState("");
@@ -117,7 +117,7 @@ export default function FieldSurvey() {
       setLocationError("緯度は-90〜90、経度は-180〜180の範囲で入力してください。");
       return;
     }
-    setCoords({ lat, lng, accuracy: 0 });
+    setCoords({ lat, lng, accuracy: null });
   };
 
   const onPhotoSelected = (file: File | null) => {
@@ -151,6 +151,8 @@ export default function FieldSurvey() {
       setCoords(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
+    } catch (err) {
+      setLocationError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -210,7 +212,7 @@ export default function FieldSurvey() {
                   <button
                     onClick={() => {
                       setManualCoords(`${t.lat.toFixed(6)}, ${t.lng.toFixed(6)}`);
-                      setCoords({ lat: t.lat, lng: t.lng, accuracy: 0 });
+                      setCoords({ lat: t.lat, lng: t.lng, accuracy: null });
                     }}
                     className="text-[11px] text-slate-600 underline"
                   >
@@ -265,7 +267,7 @@ export default function FieldSurvey() {
               <span className="flex items-center gap-2">
                 <MapPin size={16} className="text-green-700" />
                 {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
-                {coords.accuracy > 0 ? `（精度 ±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
+                {coords.accuracy != null && coords.accuracy > 0 ? `（精度 ±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
               </span>
               <button onClick={() => setCoords(null)} className="text-xs text-slate-500 underline shrink-0">
                 変更
@@ -344,7 +346,7 @@ export default function FieldSurvey() {
                 <dt>位置</dt>
                 <dd className="font-medium text-right">
                   {coords?.lat.toFixed(6)}, {coords?.lng.toFixed(6)}
-                  {coords && coords.accuracy > 0 ? `（±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
+                  {coords && coords.accuracy != null && coords.accuracy > 0 ? `（±${coords.accuracy.toFixed(0)}m）` : "（手入力）"}
                 </dd>
               </div>
               <div className="flex justify-between gap-2">

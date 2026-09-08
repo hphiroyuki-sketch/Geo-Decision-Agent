@@ -53,12 +53,12 @@ export interface SSEHandlers {
   onError?: (message: string) => void;
 }
 
-export async function streamChat(conversationId: string, content: string, handlers: SSEHandlers): Promise<void> {
+export async function streamChat(conversationId: string, content: string, handlers: SSEHandlers, selectedCellId?: string): Promise<void> {
   const res = await fetch(`/api/conversations/${conversationId}/messages`, {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, selectedCellId }),
   });
   if (!res.body) throw new Error("ストリームを開始できませんでした。");
   if (!res.ok) {

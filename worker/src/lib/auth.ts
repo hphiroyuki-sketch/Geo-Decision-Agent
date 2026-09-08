@@ -79,3 +79,11 @@ export async function requireAdmin(c: Context<AppEnv>, next: Next) {
   if (user.role !== "admin") return c.json({ error: "管理者権限が必要です。" }, 403);
   await next();
 }
+
+/** Viewer accounts can inspect evidence but cannot create, review or spend AI budget. */
+export async function requireWriteAccess(c: Context<AppEnv>, next: Next) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.get("user")?.role === "viewer") {
+    return c.json({ error: "閲覧専用アカウントでは変更できません。管理者に編集権限を依頼してください。" }, 403);
+  }
+  await next();
+}

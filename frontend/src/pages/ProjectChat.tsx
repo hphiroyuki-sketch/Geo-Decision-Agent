@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   BarChart3,
   FileText,
@@ -14,7 +14,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { api, streamChat, type PlanStep } from "../lib/api";
-import MapView, { type MapMarker } from "../components/MapView";
+import MapView, { type CellProperties, type MapMarker } from "../components/MapView";
 import MapControlPanel, { DEFAULT_MAP_CONTROLS, type MapControlState } from "../components/MapControlPanel";
 import ChatInput from "../components/ChatInput";
 import AgentSteps, { type AgentStep } from "../components/ui/AgentSteps";
@@ -79,6 +79,9 @@ const EXAMPLES = [
  */
 export default function ProjectChat() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const [selectedCell, setSelectedCell] = useState<CellProperties | null>(null);
+  const [meshBounds, setMeshBounds] = useState<[[number, number], [number, number]] | null>(null);
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -117,15 +120,24 @@ export default function ProjectChat() {
 
       try {
         const list = await api.get<{ meshes: { id: string }[] }>(`/projects/${id}/meshes`);
-        if (list.meshes[0]) {
-          const meshDetail = await api.get<{ geojson: GeoJSON.FeatureCollection }>(`/meshes/${list.meshes[0].id}`);
+        const requested = list.meshes.find(m => m.id === searchParams.get("mesh")) ?? list.meshes[0];
+        if (requested) {
+          const meshDetail = await api.get<{ geojson: GeoJSON.FeatureCollection; mesh: { center_lat: number; center_lng: number; extent_m: number } }>(`/meshes/${requested.id}`);
           setMeshGeoJson(meshDetail.geojson);
+          const m = meshDetail.mesh;
+          const dy = m.extent_m / 111320 / 2, dx = dy / Math.cos(m.center_lat * Math.PI / 180);
+          setMeshBounds([[m.center_lng - dx, m.center_lat - dy], [m.center_lng + dx, m.center_lat + dy]]);
+          const cell = meshDetail.geojson.features.find(f => f.properties?.cellId === searchParams.get("cell"));
+          if (cell?.properties) {
+            setSelectedCell(cell.properties as CellProperties);
+            setInput("このセルで、事業影響を避けるために確認する事項と、生物多様性の回復に向けた調査・対策の候補を教えてください。観測事実と仮説を分けてください。");
+          }
         }
       } catch {
         // A project with no mesh yet is the normal case, not an error.
       }
-    })();
-  }, [id]);
+    })().catch((err) => setBudgetError(err instanceof Error ? err.message : String(err)));
+  }, [id, searchParams]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -180,7 +192,12 @@ export default function ProjectChat() {
             prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || `エラー: ${message}` } : m)),
           );
         },
-      });
+      }, selectedCell?.cellId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setBudgetError(message);
+      setInput(content);
+      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `送信できませんでした: ${message}` } : m));
     } finally {
       setSending(false);
     }
@@ -319,6 +336,11 @@ export default function ProjectChat() {
           />
         </div>
 
+        {selectedCell && <div className="mx-4 mb-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
+          <div className="flex justify-between gap-2"><strong>地図で選択中 · {selectedCell.label}</strong><button aria-label="セル選択を解除" onClick={() => setSelectedCell(null)}>×</button></div>
+          <div className="mt-1">{selectedCell.lat?.toFixed(6)}, {selectedCell.lng?.toFixed(6)} · 類似度 {selectedCell.similarity?.toFixed(3) ?? "未取得"}</div>
+          <p className="mt-1">このマスの保存データを添えて相談します。種の存在は現地確認が必要です。</p>
+        </div>}
         <ChatInput
           value={input}
           onChange={setInput}
@@ -364,7 +386,11 @@ export default function ProjectChat() {
             basemap={controls.basemap}
             imageryEpoch={controls.imageryEpoch}
             imageryOpacity={controls.imageryOpacity}
+            fitBounds={focus ? null : meshBounds}
+            maxFitZoom={18}
             mesh={meshGeoJson}
+            selectedCellId={selectedCell?.cellId}
+            onCellClick={(cell) => { setSelectedCell(cell); setMobileView("chat"); }}
             meshVisible={controls.meshVisible}
             meshOpacity={controls.meshOpacity}
             meshColorMode={controls.meshColorMode}
@@ -404,6 +430,7 @@ export default function ProjectChat() {
       >
         <div className="px-3.5 py-3 border-b border-slate-100">
           <div className="text-sm font-medium text-slate-800">候補地ランキング</div>
+          <p className="mt-2 rounded bg-amber-50 p-2 text-[11px] text-amber-900">総合スコアは比較用デモです。生息地重複・保護区距離・連結性・アクセスに仮値が含まれるため、立地判断や申請の根拠には使えません。実データの確認は10mメッシュへ進んでください。</p>
           <div className="text-[10px] text-slate-400">総合スコアの高い順。タップで地図が移動します。</div>
         </div>
 

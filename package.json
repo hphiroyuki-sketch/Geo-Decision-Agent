@@ -10,15 +10,18 @@
     "deploy": "npm run build:frontend && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply geo-decision-agent-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply geo-decision-agent-db --remote",
-    "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json"
+    "typecheck:worker": "tsc --noEmit -p worker/tsconfig.json",
+    "test": "vitest run",
+    "test:release": "npm run typecheck:worker && npm run build:frontend && npm test"
   },
   "workspaces": [
     "frontend"
   ],
   "devDependencies": {
-    "wrangler": "^4.127.1",
+    "@cloudflare/workers-types": "^5.20260828.1",
     "typescript": "^5.7.2",
-    "@cloudflare/workers-types": "^5.20260828.1"
+    "vitest": "^5.0.0",
+    "wrangler": "^4.127.1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

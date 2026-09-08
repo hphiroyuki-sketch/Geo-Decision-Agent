@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import type { Env, AuthUser } from "./types";
-import { attachUser, requireAuth, requireAdmin } from "./lib/auth";
+import { attachUser, requireAuth, requireAdmin, requireWriteAccess } from "./lib/auth";
 import { authRoutes } from "./routes/auth";
 import { adminRoutes } from "./routes/admin";
 import { projectRoutes } from "./routes/projects";
@@ -21,6 +21,8 @@ app.use("*", logger());
 app.use("/api/*", attachUser);
 
 app.route("/api/auth", authRoutes);
+
+app.use("/api/*", requireWriteAccess);
 
 app.use("/api/projects/*", requireAuth);
 app.route("/api/projects", projectRoutes);

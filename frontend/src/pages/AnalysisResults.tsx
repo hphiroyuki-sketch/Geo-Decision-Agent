@@ -230,6 +230,7 @@ export default function AnalysisResults() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <h1 className="text-lg font-semibold shrink-0">分析結果</h1>
+            <p className="text-xs text-amber-300">比較用デモを含む総合スコアです。立地判断・申請根拠には使用できません。</p>
             <span className="text-[10px] rounded-md border border-[var(--gda-ink-line)] bg-white/5 px-2 py-1 truncate">
               生物多様性ポテンシャル評価
             </span>

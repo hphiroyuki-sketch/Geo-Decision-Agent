@@ -44,7 +44,7 @@ function sseEvent(type: string, data: unknown): string {
 chatRoutes.post("/:conversationId/messages", async (c) => {
   const user = c.get("user") as AuthUser;
   const conversationId = c.req.param("conversationId");
-  const body = await c.req.json<{ content?: string }>();
+  const body = await c.req.json<{ content?: string; selectedCellId?: string }>();
   const userContent = (body.content ?? "").trim();
   if (!userContent) return c.json({ error: "メッセージを入力してください。" }, 400);
 
@@ -54,6 +54,18 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
     .bind(conversationId)
     .first<{ id: string; project_id: string | null }>();
   if (!conversation) return c.json({ error: "会話が見つかりません。" }, 404);
+
+  let selectedCellContext: string | null = null;
+  if (body.selectedCellId) {
+    // Resolve values server-side and scope the cell to this conversation's project.
+    const cell = await c.env.DB.prepare(
+      `SELECT mc.id, mc.center_lat, mc.center_lng, mc.status, mc.reference_similarity, mc.change_score,
+              mc.cell_class, mc.field_records, m.year, m.cell_size_m, m.reference_points
+       FROM mesh_cells mc JOIN meshes m ON m.id = mc.mesh_id WHERE mc.id = ? AND m.project_id = ?`,
+    ).bind(body.selectedCellId, conversation.project_id).first();
+    if (!cell) return c.json({ error: "このプロジェクトのセルが見つかりません。地図から選び直してください。" }, 400);
+    selectedCellContext = `ユーザーが今回地図で選択したセル（DB保存値）: ${JSON.stringify(cell)}\nこのセルについて回答する。環境類似度を種の存在確率や生物多様性の価値と読み替えない。未取得・不明な値は不明と明示し、現地調査項目と仮説を区別する。`;
+  }
 
   const monthlyBudgetJpy = Number(await getSetting(c.env.DB, "monthly_budget_jpy", c.env.DEFAULT_MONTHLY_BUDGET_JPY));
   const usdJpyRate = Number(await getSetting(c.env.DB, "usd_jpy_rate", c.env.DEFAULT_USD_JPY_RATE));
@@ -110,7 +122,7 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
 
       // The mesh findings ride along as context so the assistant reasons from
       // what the grid measured rather than restating the conversation.
-      const meshContext = conversation.project_id
+      const meshContext = conversation.project_id && !selectedCellContext
         ? await buildMeshContext(c.env.DB, conversation.project_id)
         : null;
 
@@ -126,8 +138,9 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
             max_tokens: 4096,
             thinking: { type: "disabled" },
             system: [
-              { type: "text", text: buildSystemPrompt(appName), cache_control: { type: "ephemeral" } },
+              { type: "text", text: buildSystemPrompt(appName) + "\n候補地ランキングの総合スコアには未接続指標のデモ値が含まれる。実測値や推定精度を持つ評価として説明せず、事業影響の少なさや申請の根拠として推奨しない。メッシュの環境類似度と現地観測を区別する。", cache_control: { type: "ephemeral" } },
               ...(meshContext ? [{ type: "text" as const, text: meshContext }] : []),
+              ...(selectedCellContext ? [{ type: "text" as const, text: selectedCellContext }] : []),
             ],
             tools: [ANALYZE_TOOL],
             messages,

@@ -29,6 +29,7 @@ export default function LayerRail({ layers, onChange, open, onToggleOpen }: Prop
     <div className="rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md shadow-xl overflow-hidden">
       <button
         onClick={onToggleOpen}
+        aria-expanded={open}
         className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-[var(--gda-ink-text)]"
       >
         <span className="flex items-center gap-1.5">

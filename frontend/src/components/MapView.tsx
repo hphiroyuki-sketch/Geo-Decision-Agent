@@ -1,5 +1,11 @@
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+// MapLibre 6 ships a separate module worker. Vite cannot discover the URL
+// assembled inside the library; without this asset the SPA serves HTML at the
+// worker URL and GeoJSON never becomes renderable, even though imagery works.
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 export interface MapMarker {
   lat: number;
@@ -17,6 +23,10 @@ export type MeshColorMode = "class" | "similarity" | "change";
 export type MeshHeightMode = "flat" | "similarity" | "change";
 
 export interface CellProperties {
+  cellId?: string;
+  status?: string;
+  lat?: number;
+  lng?: number;
   cellClass: string;
   label: string;
   color: string;
@@ -43,6 +53,8 @@ interface MapViewProps {
   onMapClick?: (lat: number, lng: number) => void;
   fitBounds?: [[number, number], [number, number]] | null;
   maxFitZoom?: number;
+  fitRequest?: number;
+  selectedCellId?: string;
   /** Which aerial photography epoch to show; see IMAGERY_EPOCHS. */
   imageryEpoch?: string;
   /** 0-1. Below 1 the street map shows through, which is how a viewer compares
@@ -343,6 +355,13 @@ function ensureOverlays(map: maplibregl.Map, colorMode: MeshColorMode, opacity: 
     });
   }
 
+  if (!map.getLayer("mesh-selected")) {
+    map.addLayer({ id: "mesh-selected", type: "line", source: MESH_SOURCE,
+      filter: ["==", ["get", "cellId"], ""],
+      paint: { "line-color": "#ffffff", "line-width": 3, "line-opacity": 1 },
+    });
+  }
+
   // Extrusions and sky are the fragile ones; losing them must not cost the flat
   // mesh, which is what the analysis is actually read from.
   if (!map.getLayer("mesh-extrusion")) {
@@ -416,6 +435,8 @@ export default function MapView({
   onMapClick,
   fitBounds = null,
   maxFitZoom = 18,
+  fitRequest = 0,
+  selectedCellId,
   terrain3d = false,
   terrainExaggeration = 1.5,
   meshHeightMode = "flat",
@@ -470,18 +491,32 @@ export default function MapView({
         showAccuracyCircle: true,
       });
       map.addControl(geolocate, "top-right");
-      // Ask once the map is settled. The browser still gates this behind its
-      // own permission prompt, and a refusal simply leaves the control idle.
-      map.once("idle", () => {
-        try {
-          geolocate.trigger();
-        } catch {
-          // Unsupported or blocked; the button stays available manually.
-        }
-      });
+      // Locate only when the viewer explicitly presses the control.
     }
 
     mapRef.current = map;
+
+    // DOM diagnostics also let acceptance checks distinguish a mounted layer
+    // from cells that the WebGL renderer actually drew.
+    const reportRender = () => {
+      container.dataset.mapZoom = map.getZoom().toFixed(3);
+      container.dataset.meshSourceLoaded = String(Boolean(map.getSource(MESH_SOURCE)) && map.isSourceLoaded(MESH_SOURCE));
+      if (map.getLayer("mesh-fill")) {
+        container.dataset.meshRendered = String(map.queryRenderedFeatures({ layers: ["mesh-fill"] }).length);
+      }
+    };
+    map.on("idle", reportRender);
+    map.on("sourcedata", (event) => {
+      if (event.sourceId === MESH_SOURCE && event.isSourceLoaded) {
+        onOverlayStatusRef.current?.(true);
+      }
+    });
+    map.on("error", (event) => {
+      if ((event as { sourceId?: string }).sourceId === MESH_SOURCE) {
+        container.dataset.meshError = event.error.message;
+        onOverlayStatusRef.current?.(false);
+      }
+    });
 
     map.on("click", (e) => {
       if (onMapClickRef.current) onMapClickRef.current(e.lngLat.lat, e.lngLat.lng);
@@ -526,8 +561,7 @@ export default function MapView({
     if (!map) return;
     return whenStyleReady(map, () => {
       const ok = ensureOverlays(map, meshColorMode, meshOpacity);
-      onOverlayStatusRef.current?.(ok);
-      if (!ok) return;
+      if (!ok) { onOverlayStatusRef.current?.(false); return; }
 
       (map.getSource(MESH_SOURCE) as maplibregl.GeoJSONSource).setData(mesh ?? EMPTY);
 
@@ -548,18 +582,30 @@ export default function MapView({
 
       if (!handlersBoundRef.current) {
         handlersBoundRef.current = true;
-        map.on("click", "mesh-fill", (e) => {
+        const selectCell = (e: maplibregl.MapLayerMouseEvent) => {
           const feature = e.features?.[0];
           if (feature && onCellClickRef.current) {
             onCellClickRef.current(feature.properties as unknown as CellProperties);
           }
-        });
+        };
+        map.on("click", "mesh-fill", selectCell);
+        if (hasExtrusion) map.on("click", "mesh-extrusion", selectCell);
         map.on("mouseenter", "mesh-fill", () => (map.getCanvas().style.cursor = "pointer"));
         map.on("mouseleave", "mesh-fill", () => (map.getCanvas().style.cursor = ""));
         map.resize();
       }
     });
   }, [mesh, meshVisible, meshOpacity, gridVisible, meshColorMode, meshHeightMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    return whenStyleReady(map, () => {
+      if (!map.getLayer("mesh-selected")) return;
+      map.setFilter("mesh-selected", ["==", ["get", "cellId"], selectedCellId ?? ""]);
+      map.setLayoutProperty("mesh-selected", "visibility", meshVisible ? "visible" : "none");
+    });
+  }, [selectedCellId, meshVisible, mesh]);
 
   // Globe projection. Flat mercator is fine for a single site, but the product
   // opens on "where on earth is this", and a sphere answers that in a way a
@@ -656,7 +702,10 @@ export default function MapView({
     }
     map.setCenter([center[1], center[0]]);
     map.setZoom(zoom);
-  }, [center, zoom, fitBounds, maxFitZoom]);
+    // Callers pass coordinate arrays inline. Depending on their identity made
+    // moveend -> viewport state -> render -> fitBounds loop forever. Compare
+    // coordinates instead: panning must not be undone by a React render.
+  }, [center[0], center[1], zoom, fitBounds?.[0][0], fitBounds?.[0][1], fitBounds?.[1][0], fitBounds?.[1][1], maxFitZoom, fitRequest]);
 
   useEffect(() => {
     const map = mapRef.current;

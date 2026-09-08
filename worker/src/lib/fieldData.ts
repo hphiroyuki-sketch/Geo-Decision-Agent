@@ -49,22 +49,23 @@ export async function findNearbyFieldRecords(
 }
 
 async function getCachedEmbedding(db: D1Database, lat: number, lng: number, year: number): Promise<number[] | null> {
-  // Round to ~10m grid so nearby repeat lookups hit the cache.
-  const rLat = Math.round(lat * 10000) / 10000;
-  const rLng = Math.round(lng * 10000) / 10000;
+  // Preserve distinct 10m samples. Four decimals merge adjacent rows (~11m).
+  // Version the cache so previously rounded samples cannot masquerade as exact points.
+  const rLat = Math.round(lat * 1000000) / 1000000;
+  const rLng = Math.round(lng * 1000000) / 1000000;
   const row = await db
-    .prepare("SELECT vector_json FROM embedding_cache WHERE lat = ? AND lng = ? AND year = ?")
+    .prepare("SELECT vector_json FROM embedding_cache WHERE lat = ? AND lng = ? AND year = ? AND source = 'earth_engine_point_v2' ORDER BY fetched_at DESC LIMIT 1")
     .bind(rLat, rLng, year)
     .first<{ vector_json: string }>();
   return row ? (JSON.parse(row.vector_json) as number[]) : null;
 }
 
 async function setCachedEmbedding(db: D1Database, lat: number, lng: number, year: number, vector: number[]): Promise<void> {
-  const rLat = Math.round(lat * 10000) / 10000;
-  const rLng = Math.round(lng * 10000) / 10000;
+  const rLat = Math.round(lat * 1000000) / 1000000;
+  const rLng = Math.round(lng * 1000000) / 1000000;
   await db
     .prepare(
-      "INSERT INTO embedding_cache (id, lat, lng, year, vector_json, source, fetched_at) VALUES (?, ?, ?, ?, ?, 'earth_engine', ?)",
+      "INSERT INTO embedding_cache (id, lat, lng, year, vector_json, source, fetched_at) VALUES (?, ?, ?, ?, ?, 'earth_engine_point_v2', ?)",
     )
     .bind(newId("emb"), rLat, rLng, year, JSON.stringify(vector), new Date().toISOString())
     .run();
@@ -73,9 +74,9 @@ async function setCachedEmbedding(db: D1Database, lat: number, lng: number, year
 /** Fetches (with D1 caching) the real Satellite Embedding vector for one point, or null if EE isn't configured / the call fails. */
 export async function getEmbeddingVector(env: Env, db: D1Database, lat: number, lng: number, year: number): Promise<number[] | null> {
   if (!env.EE_SERVICE_ACCOUNT_JSON) return null;
-  const cached = await getCachedEmbedding(db, lat, lng, year);
-  if (cached) return cached;
   try {
+    const cached = await getCachedEmbedding(db, lat, lng, year);
+    if (cached) return cached;
     const { vector } = await fetchEmbeddingVector(env.EE_SERVICE_ACCOUNT_JSON, env.EE_PROJECT_ID, lat, lng, year);
     await setCachedEmbedding(db, lat, lng, year, vector);
     return vector;

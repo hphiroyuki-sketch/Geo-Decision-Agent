@@ -12,7 +12,7 @@
 
 // Bump when the scoring formula, thresholds or mitigation rules change: an
 // analysis re-run under a different engine version is not the same analysis.
-export const ENGINE_VERSION = "3.0.1";
+export const ENGINE_VERSION = "3.0.2";
 
 export interface CandidateInput {
   name: string;
@@ -125,7 +125,7 @@ export function analyzeCandidates(
     const simulatedAlphaEarthSimilarity = clamp(0.5 + rng() * 0.5, 0, 1);
     const alphaEarthSimilarity = override.alphaEarthSimilarity ?? simulatedAlphaEarthSimilarity;
     const accessDistanceKm = clamp(rng() * 5, 0.2, 5);
-    const fieldRecordsCount = override.fieldRecordsCount ?? Math.floor(rng() * 5);
+    const fieldRecordsCount = override.fieldRecordsCount ?? 0;
 
     const connectivityPenalty = connectivityRaw * 20;
     const protectedProximityPenalty = Math.max(0, 2.5 - protectedAreaDistanceKm) * 8;
@@ -137,7 +137,7 @@ export function analyzeCandidates(
       alphaEarthSimilarity * 12;
     const score = Math.round(clamp(100 - riskScore, 5, 97));
 
-    const evidenceBasis = [override.alphaEarthSimilarity !== undefined ? "Earth Engine実データ" : "衛星推定"];
+    const evidenceBasis = ["総合スコアは比較用デモ（生息地重複・保護区距離・連結性・アクセスは仮値。立地判断・申請には使用不可）", override.alphaEarthSimilarity !== undefined ? "環境類似度のみEarth Engine実データ" : "類似度はデモ値"];
     // A measured index change is the one axis that needs no field visit to be
     // real, so it is named with the years it spans rather than folded into the
     // generic "real data" label.

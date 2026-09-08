@@ -75,6 +75,7 @@ interface LegendEntry {
 interface MeshDetail {
   mesh: MeshRow;
   pending: number;
+  counts: { total: number; sampled: number; pending: number; failed: number };
   geojson: GeoJSON.FeatureCollection;
   hotspots: Hotspot[];
   actions: RecoveryActionRow[];
@@ -161,7 +162,7 @@ export default function MeshView() {
 
   const [controls, setControls] = useState<MapControlState>(DEFAULT_MAP_CONTROLS);
   const [recordsVisible, setRecordsVisible] = useState(true);
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState(() => window.innerWidth >= 640);
   const [mobileView, setMobileView] = useState<"settings" | "map">("settings");
   const [selected, setSelected] = useState<CellProperties | null>(null);
   const [overlayOk, setOverlayOk] = useState<boolean | null>(null);
@@ -169,6 +170,7 @@ export default function MeshView() {
   const [cellSizeM, setCellSizeM] = useState(10);
   const [extentM, setExtentM] = useState(200);
   const [detectChange, setDetectChange] = useState(true);
+  const [fitRequest, setFitRequest] = useState(0);
   const [centerMode, setCenterMode] = useState<"reference" | "project" | "manual">("reference");
   const [manualCenter, setManualCenter] = useState("");
   const [pickOnMap, setPickOnMap] = useState(false);
@@ -196,16 +198,17 @@ export default function MeshView() {
     ]);
     setDetail(d);
     setStats(s);
+    return d;
   }, []);
 
   useEffect(() => {
     if (!id) return;
-    loadMeshes();
-    api.get<MeshContext>(`/projects/${id}/mesh-context`).then(setContext);
+    loadMeshes().catch((err) => setError(String(err)));
+    api.get<MeshContext>(`/projects/${id}/mesh-context`).then(setContext).catch((err) => setError(String(err)));
   }, [id, loadMeshes]);
 
   useEffect(() => {
-    if (activeMeshId) loadDetail(activeMeshId);
+    if (activeMeshId) { setSelected(null); loadDetail(activeMeshId).catch((err) => setError(String(err))); }
   }, [activeMeshId, loadDetail]);
 
   // Pins already saved for this project become the editable set, so the map
@@ -218,7 +221,7 @@ export default function MeshView() {
   const plannedCenter = useMemo((): { lat: number; lng: number } | null => {
     if (centerMode === "manual") {
       const parts = manualCenter.split(/[,\s]+/).filter(Boolean).map(Number);
-      if (parts.length === 2 && parts.every((n) => !Number.isNaN(n))) return { lat: parts[0], lng: parts[1] };
+      if (parts.length === 2 && parts.every(Number.isFinite) && Math.abs(parts[0]) <= 80 && Math.abs(parts[1]) <= 180) return { lat: parts[0], lng: parts[1] };
       return null;
     }
     if (centerMode === "reference" && context?.referenceCentroid) return context.referenceCentroid;
@@ -279,6 +282,8 @@ export default function MeshView() {
     let guard = 0;
     let consecutiveFailures = 0;
     let lastError: unknown = null;
+    let acquired = alreadySampled;
+    let failures = 0;
 
     setProgress({ done: alreadySampled, total });
 
@@ -292,7 +297,12 @@ export default function MeshView() {
           );
           remaining = res.remaining;
           consecutiveFailures = 0;
-          setProgress({ done: total - remaining, total });
+          acquired += res.sampled;
+          failures += res.failed;
+          setProgress({ done: acquired, total });
+          if (guard % 4 === 0) await loadDetail(meshId);
+          // Stop an unavailable source promptly; leave other cells queued.
+          if (res.sampled === 0 && res.failed > 0) break;
           // Nothing sampled and nothing failed means the batch had no work it
           // could do; continuing would spin.
           if (res.sampled === 0 && res.failed === 0) break;
@@ -307,20 +317,21 @@ export default function MeshView() {
       try {
         await api.post(`/meshes/${meshId}/analyze`, {});
       } catch (err) {
-        console.error("mesh analyze failed", err);
+        lastError = err;
+        setError(err instanceof Error ? err.message : String(err));
       }
       await loadDetail(meshId);
       setProgress(null);
       setMobileView("map");
     }
 
-    if (remaining > 0) {
+    if (remaining > 0 || failures > 0) {
       setError(
         lastError
-          ? `途中で中断しました（残り ${remaining.toLocaleString()} マス）。取得できた分は解析済みです。「続きから再開」で続けられます。理由: ${
+          ? `途中で中断しました（未取得 ${(remaining + failures).toLocaleString()} マス）。取得できた分は解析済みです。「続きから再開」で続けられます。理由: ${
               lastError instanceof Error ? lastError.message : String(lastError)
             }`
-          : `残り ${remaining.toLocaleString()} マスを取得できませんでした。取得できた分は解析済みです。「続きから再開」をお試しください。`,
+          : `未取得 ${(remaining + failures).toLocaleString()} マスを取得できませんでした。取得できた分は解析済みです。「続きから再開」をお試しください。`,
       );
     }
   };
@@ -334,7 +345,10 @@ export default function MeshView() {
     setBusy(true);
     setError(null);
     try {
+      await api.post(`/meshes/${detail.mesh.id}/retry`, {});
       await runSampling(detail.mesh.id, total, sampled);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -355,6 +369,8 @@ export default function MeshView() {
       setSearchParams({ mesh: res.meshId }, { replace: true });
       await loadMeshes();
       setProgress({ done: 0, total: res.cells });
+      await loadDetail(res.meshId);
+      setMobileView("map");
       await runSampling(res.meshId, res.cells);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -374,11 +390,10 @@ export default function MeshView() {
    */
   const gridForViewport = (v: Viewport): { extentM: number; cellSizeM: number } => {
     const visible = Math.min(v.widthM, v.heightM);
-    const extentOptions = [100, 200, 400, 1000, 2000];
-    const extent = extentOptions.filter((e) => e <= visible).pop() ?? extentOptions[0];
     const budget = context?.maxCells ?? 2500;
-    const cell = [10, 20, 50].find((c) => (extent / c) ** 2 <= budget) ?? 50;
-    return { extentM: extent, cellSizeM: cell };
+    const extentOptions = [100, 200, 400].filter((e) => (e / 10) ** 2 <= budget);
+    const extent = extentOptions.filter((e) => e <= visible).pop() ?? extentOptions[0] ?? 100;
+    return { extentM: extent, cellSizeM: 10 };
   };
 
   /** "Analyse what I am looking at": the visible area becomes the grid. */
@@ -482,7 +497,7 @@ export default function MeshView() {
           label:
             r.source === "map_pin"
               ? `基準地点（地図で指定・現地未確認）`
-              : `基準地点（現地確認済み）: ${r.species_guess ?? "種未記入"}`,
+              : r.demo ? `デモ基準地点（実地観測ではありません）: ${r.species_guess ?? "種未記入"}` : `基準地点（現地確認済み）: ${r.species_guess ?? "種未記入"}`,
           color: r.source === "map_pin" ? "#f59e0b" : "#2563eb",
         }));
     return [...hotspotMarkers, ...referenceMarkers, ...pinMarkers];
@@ -566,7 +581,9 @@ export default function MeshView() {
   const legendEntries = detail
     ? [
         ...detail.legend.map((l) => ({ key: l.key, label: l.label, color: l.color })),
-        { key: "ref", label: "現地確認済み地点", color: "#2563eb", shape: "dot" as const },
+        { key: "pending", label: "取得待ち", color: "#475569" },
+        { key: "failed", label: "取得失敗", color: "#be7282" },
+        { key: "ref", label: "基準地点（デモを含む）", color: "#2563eb", shape: "dot" as const },
         { key: "grid", label: `${detail.mesh.cell_size_m}mグリッド`, color: "#8ba0b4", shape: "grid" as const },
       ]
     : [];
@@ -599,12 +616,12 @@ export default function MeshView() {
         className={`${mobileView === "settings" ? "block" : "hidden"} lg:block lg:w-[380px] xl:w-[400px] lg:shrink-0 border-r border-[var(--gda-ink-line)] bg-[var(--gda-ink-2)] overflow-y-auto flex-1 lg:flex-none scrollbar-dark`}
       >
         <div className="px-4 py-3 border-b border-[var(--gda-ink-line)]">
-          <div className="text-[10px] text-[var(--gda-ink-muted)]">AI調査 / FR-020・FR-026</div>
+          <div className="text-[10px] text-[var(--gda-ink-muted)]">衛星データから、次の現地調査へ</div>
           <h1 className="font-semibold text-sm">10mメッシュ解析</h1>
           <p className="text-[11px] text-[var(--gda-ink-muted)] mt-1 leading-relaxed">
-            対象地を10m四方に区切り、1マスずつ衛星データを取得します。「確認済みの生きものがいた場所」とどれだけ似ているか（
+            対象地を10m四方に区切り、1マスずつ衛星データを取得します。「指定した基準地点」と環境がどれだけ似ているか（
             <Term id="similarity">類似度</Term>）と、前年からどれだけ変わったか（<Term id="change">変化スコア</Term>
-            ）を判定し、保全すべき場所と回復すべき場所を色分けします。
+            ）を判定し、現地確認する候補を色分けします。生物の存在や保全の必要性は現地調査で確認します。
           </p>
         </div>
 
@@ -874,7 +891,7 @@ export default function MeshView() {
               <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
                 <div className="text-[11px] text-amber-200 leading-snug">
                   <strong>この解析は途中で止まっています。</strong>
-                  {detail.pending.toLocaleString()} マスが未取得です。下の結果は取得済みの
+                  {detail.pending.toLocaleString()} マスが未取得です（取得待ち {detail.counts.pending.toLocaleString()}・失敗 {detail.counts.failed.toLocaleString()}）。下の結果は取得済みの
                   {(stats?.stats?.sampled ?? 0).toLocaleString()} マスから算出しています。
                 </div>
                 <button
@@ -926,17 +943,8 @@ export default function MeshView() {
                   取得したマスの {Math.round(dominant.share * 100)}% が「{CLASS_TEXT[dominant.cellClass] ?? dominant.cellClass}
                   」に偏っています。
                 </strong>
-                この状態では区域どうしの優劣がつかず、「どこを優先すべきか」を示せません。
-                {referenceDistanceKm !== null && referenceDistanceKm < 0.2 ? (
-                  <>
-                    {" "}
-                    基準地点が解析範囲の内側（約{(referenceDistanceKm * 1000).toFixed(0)}m）にあるためです。
-                    <strong>解析する範囲を 1km 以上に広げる</strong>か、
-                    <strong>基準地点から離れた場所を中心に指定</strong>すると、差が出て順位づけができるようになります。
-                  </>
-                ) : (
-                  <> 解析範囲を広げて環境の異なる場所を含めるか、性質の違う複数地点で現地記録を登録してください。</>
-                )}
+                似た環境が広く続く場所では、同じ分類になることがあります。これだけでは生物多様性の高低や事業の影響は判断できません。
+                現地記録、土地利用、周辺とのつながりを合わせて、確認する場所を選んでください。
               </Hint>
             )}
 
@@ -1059,7 +1067,7 @@ export default function MeshView() {
             dark
             sources={[
               { id: "ae", label: "AlphaEarth", sub: `${context?.year ?? 2024}`, icon: "globe" },
-              { id: "s2", label: "Sentinel-2", icon: "satellite" },
+
               {
                 id: "photo",
                 label: "現地記録",
@@ -1097,6 +1105,8 @@ export default function MeshView() {
           terrainExaggeration={controls.exaggeration}
           markers={markers}
           fitBounds={bounds}
+          fitRequest={fitRequest}
+          selectedCellId={selected?.cellId}
           maxFitZoom={18}
           globe={false}
           showUserLocation
@@ -1124,10 +1134,12 @@ export default function MeshView() {
               {context?.project.areaHa != null && <span>面積 {context.project.areaHa.toLocaleString()} ha</span>}
               {detail && <span>{detail.mesh.cell_size_m}m グリッド ・ {detail.mesh.extent_m}m 四方</span>}
               {detail && <span>{detail.mesh.year}年データ</span>}
+              {detail && <span>取得 {detail.counts.sampled.toLocaleString()} / {detail.counts.total.toLocaleString()} マス</span>}
             </div>
           </div>
 
           <div className="ml-auto flex gap-1.5 pointer-events-auto shrink-0">
+            <button aria-label="解析範囲全体に戻る" title="解析範囲全体に戻る" onClick={() => setFitRequest(v => v + 1)} className="rounded-lg border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] p-2"><Crosshair size={12} /></button>
             <button
               onClick={() => setControls((c) => ({ ...c, terrain3d: !c.terrain3d }))}
               title="3D地形の表示を切り替えます"
@@ -1165,7 +1177,7 @@ export default function MeshView() {
         {/* The two actions that operate on what is actually on screen. They sit
             on the map, not in the settings column, because both are about the
             view: "this habitat" and "this area". */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 w-[min(92%,30rem)]">
+        <div className={`${selected ? "hidden" : ""} absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 w-[min(92%,30rem)]`}>
           {pinMode ? (
             <div className="w-full rounded-xl border border-amber-500/50 bg-[rgba(11,22,34,0.94)] backdrop-blur-md p-3 shadow-2xl">
               <div className="flex items-start gap-2">
@@ -1227,7 +1239,7 @@ export default function MeshView() {
                   className="flex items-center gap-1.5 rounded-full bg-[var(--gda-green)] hover:bg-[var(--gda-green-dark)] px-3.5 py-2 text-[11px] font-semibold text-white shadow-xl"
                 >
                   <Scan size={13} />
-                  この表示範囲で解析（
+                  地図の中心を10m解析範囲に設定（
                   {(() => {
                     const g = gridForViewport(viewport);
                     return `${g.extentM >= 1000 ? `${g.extentM / 1000}km` : `${g.extentM}m`}四方・${g.cellSizeM}m`;
@@ -1241,11 +1253,11 @@ export default function MeshView() {
 
         {/* Layer rail + legend. Scrolls on a short screen instead of clipping. */}
         <div
-          className={`${pinMode ? "hidden" : ""} absolute top-16 right-2.5 z-10 w-52 max-h-[calc(100%-10rem)] overflow-y-auto scrollbar-dark space-y-2`}
+          className={`${pinMode ? "hidden" : ""} absolute top-16 right-2.5 z-10 ${railOpen ? "w-52" : "w-auto"} max-h-[calc(100%-10rem)] overflow-y-auto scrollbar-dark space-y-2`}
         >
           <LayerRail layers={layers} onChange={onLayerChange} open={railOpen} onToggleOpen={() => setRailOpen((v) => !v)} />
 
-          {detail && (
+          {detail && railOpen && (
             <>
               <div className="rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.86)] backdrop-blur-md p-2.5">
                 <div className="text-[10px] text-[var(--gda-ink-muted)] mb-1.5">マスの色分け</div>
@@ -1297,16 +1309,17 @@ export default function MeshView() {
         </div>
 
         {selected && (
-          <div className="absolute bottom-3 left-3 right-3 sm:right-auto sm:w-72 z-10 rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.92)] backdrop-blur-md p-3 shadow-xl">
+          <div className="absolute bottom-16 left-3 right-3 sm:right-auto sm:w-72 z-10 rounded-xl border border-[var(--gda-ink-line)] bg-[rgba(11,22,34,0.92)] backdrop-blur-md p-3 shadow-xl">
             <div className="flex items-start justify-between gap-2">
               <div className="text-xs font-semibold flex items-center gap-1.5">
                 <Ruler size={12} className="text-[var(--gda-ink-muted)]" />
                 {selected.label}
               </div>
-              <button onClick={() => setSelected(null)} className="text-[var(--gda-ink-muted)] text-sm leading-none">
+              <button aria-label="セル情報を閉じる" onClick={() => setSelected(null)} className="text-[var(--gda-ink-muted)] text-sm leading-none">
                 ×
               </button>
             </div>
+            {selected.lat != null && selected.lng != null && <p className="text-[10px] mt-1 tabular-nums text-[var(--gda-ink-muted)]">{selected.lat.toFixed(6)}, {selected.lng.toFixed(6)} · {detail?.mesh.cell_size_m}mセル</p>}
             <dl className="mt-2 space-y-1 text-[11px]">
               <div className="flex justify-between">
                 <dt className="text-[var(--gda-ink-muted)]">
@@ -1325,8 +1338,9 @@ export default function MeshView() {
                 <dd className="font-medium tabular-nums">{selected.fieldRecords} 件</dd>
               </div>
             </dl>
+            {selected.cellId && <Link className="mt-3 block rounded-lg bg-emerald-700 px-3 py-2 text-center text-xs text-white hover:bg-emerald-600" to={`/projects/${id}?mesh=${detail?.mesh.id}&cell=${selected.cellId}`}>このマスについてAIに相談</Link>}
             <p className="text-[10px] text-[var(--gda-ink-muted)] mt-2 leading-relaxed">
-              Google Satellite Embedding の実測値です。変化の「原因」は衛星では判定できないため、現地確認が必要です。
+              {selected.status === "pending" ? "このマスは取得待ちです。未取得を環境変化なしと解釈しないでください。" : selected.status === "failed" ? "データを取得できませんでした。続きから再開すると失敗したマスを再試行します。" : "Google Satellite Embedding から算出した環境の類似度です。種の存在や変化の原因を確認するには現地調査が必要です。"}
             </p>
           </div>
         )}
