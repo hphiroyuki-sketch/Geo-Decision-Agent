@@ -64,7 +64,14 @@ chatRoutes.post("/:conversationId/messages", async (c) => {
        FROM mesh_cells mc JOIN meshes m ON m.id = mc.mesh_id WHERE mc.id = ? AND m.project_id = ?`,
     ).bind(body.selectedCellId, conversation.project_id).first();
     if (!cell) return c.json({ error: "このプロジェクトのセルが見つかりません。地図から選び直してください。" }, 400);
-    selectedCellContext = `ユーザーが今回地図で選択したセル（DB保存値）: ${JSON.stringify(cell)}\nこのセルについて回答する。環境類似度を種の存在確率や生物多様性の価値と読み替えない。未取得・不明な値は不明と明示し、現地調査項目と仮説を区別する。`;
+    const evidence = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS confirmed_records,
+              SUM(CASE WHEN demo = 1 THEN 1 ELSE 0 END) AS demo_records,
+              SUM(CASE WHEN source = 'map_pin' THEN 1 ELSE 0 END) AS map_pins,
+              SUM(CASE WHEN demo = 0 AND source <> 'map_pin' THEN 1 ELSE 0 END) AS observed_records
+       FROM field_records WHERE project_id = ? AND review_status = 'confirmed'`,
+    ).bind(conversation.project_id).first();
+    selectedCellContext = `現在のプロジェクトの基準記録の内訳: ${JSON.stringify(evidence)}。demo_recordsは架空の観測、map_pinsは地図で指定した比較地点で、生息の証拠ではない。observed_recordsが0なら「生息確認地点」と呼ばず、比較基準はデモまたは地図指定で実地の裏付けがないと回答の冒頭で明示する。過去の解析時の基準記録スナップショットは未保存のため、現在の内訳との一致は断定しない。\nユーザーが今回地図で選択したセル（DB保存値）: ${JSON.stringify(cell)}\nこのセルについて回答する。環境類似度を種の存在確率や生物多様性の価値と読み替えない。未取得・不明な値は不明と明示し、現地調査項目と仮説を区別する。`;
   }
 
   const monthlyBudgetJpy = Number(await getSetting(c.env.DB, "monthly_budget_jpy", c.env.DEFAULT_MONTHLY_BUDGET_JPY));

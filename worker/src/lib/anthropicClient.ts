@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // snapshot: bump PROMPT_VERSION whenever buildSystemPrompt changes in a way
 // that could change an answer, so an old result is never silently attributed
 // to today's wording.
-export const PROMPT_VERSION = "2026-09-08-selected-cell";
+export const PROMPT_VERSION = "2026-09-09-selected-cell-evidence";
 export const EMBEDDING_DATASET = "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL";
 export const INDICES_DATASET = "COPERNICUS/S2_SR_HARMONIZED";
 
