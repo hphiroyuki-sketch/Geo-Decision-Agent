@@ -1,5 +1,6 @@
 import { createRoot, type Root } from "react-dom/client";
 import OrganismCard from "./OrganismCard";
+import { sampleGroundElevation } from "../lib/terrainElevation";
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
@@ -189,16 +190,11 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
-// Elevation tiles for 3D terrain. Terrarium encoding, no API key, global
-// coverage to z15 - coarser than the imagery, so relief reads while an
-// individual 10m cell does not get its own landform.
+// Global elevation tiles used by the MapLibre terrain example. TileJSON
+// supplies encoding, resolution and attribution independently of imagery.
 const DEM_SOURCE: maplibregl.RasterDEMSourceSpecification = {
   type: "raster-dem",
-  tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
-  encoding: "terrarium",
-  tileSize: 256,
-  maxzoom: 15,
-  attribution: "Elevation: Mapzen / AWS Terrain Tiles",
+  url: "https://tiles.mapterhorn.com/tilejson.json",
 };
 
 const MESH_SOURCE = "mesh";
@@ -390,20 +386,11 @@ function ensureOverlays(map: maplibregl.Map, colorMode: MeshColorMode, opacity: 
   return Boolean(map.getLayer("mesh-fill"));
 }
 
-/** Adds the elevation source on demand; terrain cannot be set without it. */
-function ensureTerrainSource(map: maplibregl.Map): boolean {
-  if (!map.getSource(DEM_SOURCE_ID)) {
-    try {
-      map.addSource(DEM_SOURCE_ID, DEM_SOURCE);
-    } catch (err) {
-      console.error("elevation source unavailable", err);
-      return false;
-    }
-  }
-  return true;
+export default function MapView(props: MapViewProps) {
+  return <MapCanvas key={`${Boolean(props.terrain3d)}-${props.terrainExaggeration ?? 1.5}`} {...props} />;
 }
 
-export default function MapView({
+function MapCanvas({
   center,
   zoom = 6,
   markers = [],
@@ -455,7 +442,15 @@ export default function MapView({
     const container = containerRef.current;
     const map = new maplibregl.Map({
       container,
-      style: BASE_STYLE,
+      style: {
+        ...BASE_STYLE,
+        sources: {...SOURCES, ...(terrain3d ? {[DEM_SOURCE_ID]: DEM_SOURCE} : {})},
+        ...(terrain3d ? {terrain:{source:DEM_SOURCE_ID,exaggeration:terrainExaggeration}} : {}),
+        projection:{type:globe ? "globe" : "mercator"},
+        sky:{"sky-color":"#071321","horizon-color":"#87b8db","atmosphere-blend":globe ? 0.85 : 0},
+      },
+      pitch: terrain3d ? 60 : 0,
+      centerClampedToGround: !terrain3d,
       center: [center[1], center[0]],
       zoom,
       // Imagery tops out at z18; more just scales tiles up and invites requests
@@ -484,13 +479,7 @@ export default function MapView({
     const renderError = (event: ErrorEvent) => { container.dataset.renderError = event.message; };
     window.addEventListener('error', renderError);
     map.once('remove', () => window.removeEventListener('error', renderError));
-    const originalError = console.error;
-    const originalWarn = console.warn;
-    console.error = (...args) => { container.dataset.consoleError = args.map(String).join(' ').slice(0,2000); originalError(...args); };
-    console.warn = (...args) => { container.dataset.consoleWarn = args.map(String).join(' ').slice(0,2000); originalWarn(...args); };
-    const rejection = (e:PromiseRejectionEvent) => { container.dataset.rejection = String(e.reason); };
-    window.addEventListener('unhandledrejection', rejection);
-    map.once('remove', () => { console.error = originalError; console.warn = originalWarn; window.removeEventListener('unhandledrejection', rejection); });
+
 
     // DOM diagnostics also let acceptance checks distinguish a mounted layer
     // from cells that the WebGL renderer actually drew.
@@ -500,6 +489,8 @@ export default function MapView({
       container.dataset.mapElevation = String(map.getCenterElevation());
       container.dataset.mapProjection = JSON.stringify(map.getProjection()?.type ?? "pending");
       container.dataset.mapTerrain = JSON.stringify(map.getTerrain());
+      container.dataset.terrainElevation = String(map.queryTerrainElevation(map.getCenter()));
+      container.dataset.centerClamped = String(map.getCenterClampedToGround());
       container.dataset.demLoaded = String(Boolean(map.getSource(DEM_SOURCE_ID)) && map.isSourceLoaded(DEM_SOURCE_ID));
       container.dataset.meshSourceLoaded = String(Boolean(map.getSource(MESH_SOURCE)) && map.isSourceLoaded(MESH_SOURCE));
       if (map.getLayer("mesh-fill")) {
@@ -508,6 +499,34 @@ export default function MapView({
     };
     map.on("idle", reportRender);
     map.on("moveend", reportRender);
+    let elevationRequest = 0;
+    let lastFallback = '';
+    let lastFallbackElevation: number | null = null;
+    const alignGround = () => {
+      if (!terrain3d || map.isMoving()) return;
+      if(map.getZoom()<8){lastFallback='';lastFallbackElevation=null;elevationRequest++;}
+      // The renderer's coverage sampler agrees with the displayed terrain;
+      // its automatic camera sampler can return sea level at mesh zooms.
+      const elevation = map.getZoom() < 8 ? 0 : map.queryTerrainElevation(map.getCenter());
+      if (elevation != null && Number.isFinite(elevation) && Math.abs(map.getCenterElevation() - elevation) > 0.5) {
+        if(elevation !== 0 || map.getZoom() < 8) map.setCenterElevation(elevation);
+      }
+      if(map.getZoom() >= 8 && !elevation){
+        const center=map.getCenter();const key=`${center.lat.toFixed(5)},${center.lng.toFixed(5)}`;
+        if(lastFallback===key){
+          if(lastFallbackElevation!=null && Math.abs(map.getCenterElevation()-lastFallbackElevation)>0.5)map.setCenterElevation(lastFallbackElevation);
+          return;
+        }
+        lastFallback=key;lastFallbackElevation=null;const request=++elevationRequest;
+        sampleGroundElevation(center.lat,center.lng).then(height=>{
+          if(mapRef.current!==map || request!==elevationRequest || map.getZoom()<8)return;
+          if(map.getCenter().distanceTo(center)>10)return;
+          lastFallbackElevation=height*terrainExaggeration;
+          map.setCenterElevation(lastFallbackElevation);
+        }).catch(()=>{lastFallback='';});
+      }
+    };
+    map.on("idle", alignGround);
     map.on("sourcedata", (event) => {
       if (event.sourceId === MESH_SOURCE && event.isSourceLoaded) {
         onOverlayStatusRef.current?.(true);
@@ -616,30 +635,10 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    let projection: string | null = null;
-    const syncProjection = () => {
-      const type = globe && map.getZoom() < 8 ? "globe" : "mercator";
-      if (projection === type) return;
-      const rebuildTerrain = projection === "globe" && type === "mercator" && Boolean(map.getTerrain());
-      if (rebuildTerrain) {
-        map.setTerrain(null);
-        if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
-      }
-      projection = type;
-      map.setProjection({ type });
-      map.setSky(type === "globe" ? { "sky-color": "#071321", "horizon-color": "#87b8db", "sky-horizon-blend": 0.5, "atmosphere-blend": 0.85 } : { "atmosphere-blend": 0, "horizon-fog-blend": 0, "sky-horizon-blend": 0 });
-      if (rebuildTerrain && ensureTerrainSource(map)) map.setTerrain({source:DEM_SOURCE_ID,exaggeration:terrainExaggeration});
-    };
-    const cancel = whenStyleReady(map, () => {
-      try {
-        syncProjection();
-        map.on("zoom", syncProjection);
-      } catch (err) {
-        // An older renderer just stays flat; nothing else depends on this.
-        console.error("projection unavailable", err);
-      }
+    return whenStyleReady(map, () => {
+      map.setProjection({ type: globe ? "globe" : "mercator" });
+      map.setSky({ "sky-color": "#071321", "horizon-color": "#87b8db", "sky-horizon-blend": 0.5, "atmosphere-blend": globe ? 0.85 : 0 });
     });
-    return () => { cancel(); map.off("zoom", syncProjection); };
   }, [globe]);
 
   // The opening flight: start far out, then descend to the target.
@@ -698,29 +697,12 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    let terrainActive = false;
-    const sync = () => {
-      const enable = terrain3d;
-      if (enable !== terrainActive) {
-        terrainActive = enable;
-        if (enable && ensureTerrainSource(map)) map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
-        else map.setTerrain(null);
-        map.triggerRepaint();
-      }
-
-    };
     const normalizePitch = () => { if (globe && map.getZoom() < 6 && map.getPitch() > 0) map.setPitch(0); };
     const cancel = whenStyleReady(map, () => {
-      map.setTerrain(null);
-      sync();
-      if (terrain3d && map.getZoom() >= 9 && map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
-      if (!terrain3d && map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
-      // Changing terrain during a globe-to-site camera animation can leave
-      // render-to-texture tiles stale. Apply it after the camera settles.
-      map.on("moveend", sync);
       map.on("zoomend", normalizePitch);
+      map.triggerRepaint();
     });
-    return () => { cancel(); map.off("moveend", sync); map.off("zoomend", normalizePitch); };
+    return () => { cancel(); map.off("zoomend", normalizePitch); };
   }, [terrain3d, terrainExaggeration, globe]);
 
   useEffect(() => {

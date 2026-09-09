@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "lucide-react": "^1.38.0",
-    "maplibre-gl": "^6.6.0",
+    "maplibre-gl": "6.8.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
