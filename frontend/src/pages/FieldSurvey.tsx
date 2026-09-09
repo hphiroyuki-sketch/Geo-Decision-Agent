@@ -15,6 +15,7 @@ interface FieldRecordRow {
   notes: string | null;
   photo_key: string | null;
   captured_at: string;
+  photo_content_type?: string;
   review_status: string;
   observer_name: string;
   demo?: number;
@@ -65,6 +66,7 @@ export default function FieldSurvey() {
   const [confirming, setConfirming] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [capturedAt, setCapturedAt] = useState(() => { const d = new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); });
   const [speciesGuess, setSpeciesGuess] = useState("");
   const [taxonConfidence, setTaxonConfidence] = useState("中");
   const [notes, setNotes] = useState("");
@@ -143,6 +145,7 @@ export default function FieldSurvey() {
   };
 
   const onPhotoSelected = (file: File | null) => {
+    if (file && (file.size > 8*1024*1024 || !["image/jpeg","image/png","image/webp","video/mp4","video/webm"].includes(file.type))) { setLocationError("JPEG・PNG・WebP写真、MP4・WebM動画（8MBまで）を選択してください。"); return; }
     setPhotoFile(file);
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview(file ? URL.createObjectURL(file) : null);
@@ -150,6 +153,7 @@ export default function FieldSurvey() {
 
   const submit = async () => {
     if (!id || !coords) return;
+    if (!capturedAt || !Number.isFinite(Date.parse(capturedAt))) { setLocationError("観測・撮影日時を入力してください。"); return; }
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
@@ -159,7 +163,8 @@ export default function FieldSurvey() {
         speciesGuess: speciesGuess || undefined,
         taxonConfidence,
         notes: notes || undefined,
-        capturedAt: new Date().toISOString(),
+        capturedAt: new Date(capturedAt).toISOString(),
+        locationSource: coords.accuracy == null ? "manual" : "device",
       };
       if (photoFile) {
         body.photoBase64 = await fileToBase64(photoFile);
@@ -257,12 +262,13 @@ export default function FieldSurvey() {
       )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+        <label className="block text-xs font-medium text-slate-600">観測・撮影日時（端末の現地時刻）<input type="datetime-local" value={capturedAt} onChange={e=>setCapturedAt(e.target.value)} className="mt-1 block border border-slate-300 rounded-lg p-2 text-sm" /></label>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1.5">写真</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">写真・動画（8MBまで）</label>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
             capture="environment"
             onChange={(e) => onPhotoSelected(e.target.files?.[0] ?? null)}
             className="hidden"
@@ -270,7 +276,7 @@ export default function FieldSurvey() {
           />
           {photoPreview ? (
             <div className="relative w-full max-w-xs">
-              <img src={photoPreview} alt="プレビュー" className="rounded-lg w-full object-cover" />
+              {photoFile?.type.startsWith("video/") ? <video src={photoPreview} controls className="rounded-lg w-full" /> : <img src={photoPreview} alt="プレビュー" className="rounded-lg w-full object-cover" />}
               <button
                 onClick={() => onPhotoSelected(null)}
                 className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1"
@@ -283,7 +289,7 @@ export default function FieldSurvey() {
               htmlFor="photo-input"
               className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-8 text-slate-500 text-sm cursor-pointer hover:border-[var(--gda-green)] hover:text-[var(--gda-green)]"
             >
-              <Camera size={20} /> 写真を撮影 / 選択
+              <Camera size={20} /> 写真・動画を選択
             </label>
           )}
         </div>
@@ -428,12 +434,8 @@ export default function FieldSurvey() {
         <div className="space-y-2">
           {records.map((r) => (
             <div key={r.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex gap-3">
-              {r.photo_key && (
-                <img
-                  src={`/api/field-records/${r.id}/photo`}
-                  alt={r.species_guess ?? "現地写真"}
-                  className="w-16 h-16 rounded-lg object-cover shrink-0"
-                />
+              {r.photo_key && (r.photo_content_type?.startsWith("video/") ? <video src={`/api/field-records/${r.id}/photo`} controls preload="metadata" className="w-24 h-24 rounded-lg object-cover" /> :
+                <img src={`/api/field-records/${r.id}/photo`} alt={r.species_guess ?? "現地写真"} className="w-24 h-24 rounded-lg object-cover" />
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">

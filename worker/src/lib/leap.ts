@@ -16,7 +16,7 @@
 // output against the framework line by line.
 
 import type { Env } from "../types";
-import { CELL_CLASS_LABEL, PRIORITY_A_THRESHOLD, CHANGED_THRESHOLD, type CellClass } from "./mesh";
+import { CELL_CLASS_LABEL, type CellClass } from "./mesh";
 import { PUBLIC_DATA_SOURCES, type PublicDataBundle } from "./publicData";
 
 export type LeapPhase = "scoping" | "locate" | "evaluate" | "assess" | "prepare";
@@ -67,7 +67,7 @@ export interface LeapItem {
 }
 
 export const BASIS_LABEL: Record<LeapItem["basis"], string> = {
-  measured: "衛星実測",
+  measured: "衛星由来の算出値",
   field_confirmed: "現地確認済み",
   map_designated: "地図上で指定（現地未確認）",
   configured: "登録・設定値",
@@ -373,7 +373,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
       reason:
         c.confidence === "低"
           ? `信頼度「低」。判断の裏付けが不足しており、この結果だけで立地を決めることはできない。`
-          : `総合スコア ${c.score}／推奨アクション: ${c.recommended_action}`,
+          : "比較デモを含むため、企業の立地判断には未評価。現地情報と正式データによる再評価が必要です。",
       score: null,
       evidence: (c.evidence_basis ?? "").split(",").filter(Boolean),
     });
@@ -469,7 +469,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
       requires:
         hz && hasMeshResult
           ? "これは代理指標であり、生態系サービスの評価ではありません。水源涵養・土壌保持・受粉等の定量評価には、保安林指定等の個別データと専門家評価が必要です。"
-          : "水源涵養・土壌保持・受粉等のサービス評価が必要です。全国規模のオープンAPIとして提供されている権威データセットは存在しません。",
+          : "水源涵養・土壌保持・受粉等のサービス評価が必要です。本システムには、その評価に必要なデータを接続していません。",
       source: hz && hasMeshResult ? "国土地理院ハザードマップ ＋ 自システムの植生解析（代理指標）" : undefined,
       fetchedAt: publicOf("gsi_hazard")?.fetched_at ?? null,
     },
@@ -516,10 +516,10 @@ export async function buildLeapReport(env: Env, projectId: string) {
   add({
     code: "L1",
     phase: "locate",
-    titleEn: "Business footprint",
-    title: "事業のフットプリント",
+    titleEn: "Span of the business model and value chain",
+    title: "事業モデルとバリューチェーンの範囲",
     question: "直接操業する資産・拠点と、関連するバリューチェーンの活動はどこにあるか。",
-    coverage: sites.length > 0 ? "covered" : "not_covered",
+    coverage: sites.length > 0 ? "partial" : "not_covered",
     verdict:
       sites.length > 0
         ? `直接操業に関する ${sites.length} 地点を座標で特定済み。`
@@ -543,9 +543,18 @@ export async function buildLeapReport(env: Env, projectId: string) {
   });
 
   add({
-    code: "L2",
+    code: "L2", phase: "locate", titleEn: "Dependency and impact screening", title: "依存・影響のスクリーニング",
+    question: "どの事業・バリューチェーン・直接操業に、自然への中程度以上の依存・影響があり得るか。",
+    coverage: "not_covered",
+    verdict: "事業別の依存・影響スクリーニングは未実施です。ユースケースの登録だけでは評価できません。",
+    items: [{label:"ユースケース区分",value:project.use_case,basis:"configured"}],
+    gaps: ["事業活動とバリューチェーンを特定し、依存・影響のスクリーニングを実施してください。"],
+  });
+
+  add({
+    code: "L3",
     phase: "locate",
-    titleEn: "Nature interface",
+    titleEn: "Interface with nature",
     title: "自然との接点",
     question:
       "それらの活動はどのバイオーム・生態系と接しているか。各地点の生態系の完全性と重要性は現在どうか。",
@@ -595,53 +604,28 @@ export async function buildLeapReport(env: Env, projectId: string) {
   });
 
   add({
-    code: "L3",
+    code: "L4",
     phase: "locate",
-    titleEn: "Priority location identification",
-    title: "優先地域の特定",
+    titleEn: "Interface with sensitive locations",
+    title: "感度の高い地域との接点",
     question:
       "高い生態系完全性を持つ地域、完全性が急速に低下している地域、生物多様性上重要な地域、水ストレス地域、重大な依存・影響が想定される地域はどこか。",
     coverage: sensitive.some((s) => s.assessable) ? "partial" : "not_covered",
-    verdict: (() => {
-      const done = sensitive.filter((s) => s.assessable).length;
-      // The reason a criterion was not assessed matters: "we have no dataset for
-      // it" and "you have not run the analysis yet" call for different actions.
-      const blockedByData = sensitive.filter(
-        (s) => !s.assessable && ["biodiversity_importance", "water_risk", "ecosystem_services"].includes(s.key),
-      ).length;
-      const blockedByRun = 5 - done - blockedByData;
-      return (
-        `TNFDが定める感度の高い地域の5基準のうち、本システムで判定できたのは ${done} 基準です。` +
-        `${blockedByData} 基準は公的データ未接続のため判定していません。` +
-        (blockedByRun > 0 ? `残り ${blockedByRun} 基準は解析が未実施のため判定できていません。` : "")
-      );
-    })(),
+    verdict: `5基準のうち、参照情報を取得しているのは ${sensitive.filter(s=>s.assessable).length} 基準です。衛星の類似度・変化は補助情報であり、完全性の評価は未実施です。正式な指定・現地状態との照合が必要です。`,
     items: sensitive.map((s) => ({
       label: s.title,
       value: s.result,
-      basis: s.assessable ? ("measured" as const) : ("missing" as const),
+      basis: s.assessable ? ("configured" as const) : ("missing" as const),
       note: s.requires,
     })),
     gaps: sensitive.filter((s) => !s.assessable).map((s) => `${s.title}：${s.requires ?? "データ未接続"}`),
   });
 
   add({
-    code: "L4",
-    phase: "locate",
-    titleEn: "Sector identification",
-    title: "セクターの特定",
-    question: "優先地域で自然と接しているのは、どのセクター・事業単位・バリューチェーン・資産クラスか。",
-    coverage: "partial",
-    verdict: "プロジェクトのユースケース区分のみ保持しています。事業単位・資産クラスの紐付けは利用者側の作業です。",
-    items: [{ label: "ユースケース区分", value: project.use_case, basis: "configured" }],
-    gaps: ["事業単位・資産クラス・バリューチェーン区分との紐付けは本システムの対象外です。"],
-  });
-
-  add({
     code: "E1",
     phase: "evaluate",
-    titleEn: "Identification of relevant environmental assets and ecosystem services",
-    title: "環境資産・生態系サービスの特定",
+    titleEn: "Identification of environmental assets, ecosystem services and impact drivers",
+    title: "環境資産・生態系サービス・影響要因の特定",
     question: "各優先地域でどの事業活動が行われ、どの環境資産・生態系サービスに依存／影響しているか。",
     coverage: "not_covered",
     verdict:
@@ -802,14 +786,14 @@ export async function buildLeapReport(env: Env, projectId: string) {
     return {
       label,
       value: total > 0 ? `${total} 件（対象 ${area.toFixed(2)}ha／完了 ${done} 件）` : "施策なし",
-      basis: total > 0 ? "measured" : "missing",
+      basis: total > 0 ? "configured" : "missing",
     };
   };
 
   add({
     code: "A2",
     phase: "assess",
-    titleEn: "Existing risk mitigation and management",
+    titleEn: "Adjustment of existing risk mitigation and risk and opportunity management",
     title: "既存の低減策・管理手法",
     question: "すでに適用している低減策・管理手法は何か。",
     coverage: actions.length > 0 ? "partial" : "not_covered",
@@ -835,7 +819,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
     coverage: hasMeshResult || candidates.length > 0 ? "partial" : "not_covered",
     verdict:
       hasMeshResult || candidates.length > 0
-        ? "面積・変化量・連結度から重要度を算出し、区域および候補地の順位を提示しています。財務影響の定量化は未実装です。"
+        ? "衛星解析区域の面積・連結度・信号強度から、現地確認の候補を整理しています。企業の重要性判断と財務影響の定量化は未実装です。"
         : "順位づけの材料がありません。",
     items: [
       {
@@ -848,7 +832,7 @@ export async function buildLeapReport(env: Env, projectId: string) {
       {
         label: "候補地の順位",
         value: candidates.length
-          ? candidates.map((c) => `${c.rank}. ${c.label}（${c.score}点）`).join("／")
+          ? `${candidates.length}地点の比較デモあり。正式な順位は未評価`
           : "候補地比較は未実施",
         basis: candidates.length ? "estimated" : "missing",
         note: candidates.length

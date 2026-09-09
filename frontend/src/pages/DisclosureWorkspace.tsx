@@ -19,6 +19,10 @@ export default function DisclosureWorkspace(){
   const load=()=>api.get<Workspace>(`/projects/${id}/disclosure`);
   useEffect(()=>{let live=true;load().then(d=>{if(live){setData(d);setEntry(d.entries.find(e=>e.framework==='tnfd'&&e.code==='scope')??empty('scope'));}}).catch(e=>setError(String(e)));return()=>{live=false};},[id]);
   useEffect(()=>{const guard=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[dirty]);
+  useEffect(()=>{
+    const guard=(e:MouseEvent)=>{ const anchor=(e.target as Element)?.closest?.('a[href]'); if(dirty&&anchor&&!window.confirm('未保存の入力があります。破棄して移動しますか？')){e.preventDefault();e.stopPropagation();} };
+    document.addEventListener('click',guard,true);return()=>document.removeEventListener('click',guard,true);
+  },[dirty]);
   const select=(f:Framework,c:string)=>{
     if(dirty&&!window.confirm('未保存の入力があります。破棄して別の項目を開きますか？'))return;
     setFramework(f);setCode(c);setEntry(data?.entries.find(e=>e.framework===f&&e.code===c)??empty(c));setDirty(false);setHistory(null);setNotice('');setError('');

@@ -20,7 +20,7 @@ export const PHASE_TITLE: Record<LeapPhase, string> = {
 export type Basis = "measured" | "field_confirmed" | "map_designated" | "configured" | "estimated" | "missing";
 
 export const BASIS_LABEL: Record<Basis, string> = {
-  measured: "衛星実測",
+  measured: "衛星由来の算出値",
   field_confirmed: "現地確認済み",
   map_designated: "地図上で指定（現地未確認）",
   configured: "登録・設定値",

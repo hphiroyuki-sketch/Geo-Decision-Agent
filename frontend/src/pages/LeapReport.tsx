@@ -245,7 +245,7 @@ export default function LeapReport() {
               </li>
               <li>立地の最終決定および法定アセスメントの要否判断は、所管行政庁および専門家の確認を経てください。</li>
               <li>
-                各項目には根拠区分（衛星実測／現地確認済み／推定値／未取得）を付しています。
+                各項目には根拠区分（衛星由来の算出値／現地確認済み／推定値／未取得）を付しています。
                 <strong>「未取得」「判定不可」の項目は判定していません。</strong>
               </li>
               <li>
@@ -266,7 +266,7 @@ export default function LeapReport() {
         <section className="page">
           <H n="1" title="スクリーニング結果" />
           <p className="text-[12px] text-slate-600 leading-relaxed mb-4">
-            対象地点ごとの一次判定です。判定は本システムが取得した衛星実測値と現地記録に基づくもので、
+            対象地点ごとの一次判定です。判定は本システムが取得した衛星由来の算出値値と現地記録に基づくもので、
             網羅的な環境調査の結果ではありません。
           </p>
 
@@ -336,7 +336,7 @@ export default function LeapReport() {
           <div className="flex flex-wrap gap-2 mb-3 text-[10px] text-slate-600">
             <span className="font-medium">根拠区分の凡例：</span>
             <span className="border border-emerald-300 bg-emerald-50 text-emerald-800 rounded px-1.5 py-0.5">
-              衛星実測／現地確認済み＝実データ
+              衛星由来の算出値／現地確認済み＝実データ
             </span>
             <span className="border border-sky-300 bg-sky-50 text-sky-800 rounded px-1.5 py-0.5">
               登録・設定値＝利用者が入力した条件
@@ -416,7 +416,7 @@ export default function LeapReport() {
                             : "bg-slate-100 text-slate-600 border-slate-300"
                       }`}
                     >
-                      {s.assessable ? "判定済" : s.proxy ? "代理指標" : "判定不可"}
+                      {s.assessable ? "照合済み（参考）" : s.proxy ? "補助情報" : "判定不可"}
                     </span>
                   </Td>
                   <Td>
@@ -443,10 +443,10 @@ export default function LeapReport() {
             <div className="text-[11px] font-semibold mb-1">この表の読み方</div>
             <ul className="text-[11px] text-slate-700 leading-relaxed space-y-1 list-disc list-inside">
               <li>
-                <strong>判定済</strong>：公的データに照会し、結果を得た項目です。出典と取得日時を併記しています。
+                <strong>照合済み（参考）</strong>：公開データに照会し、結果を得た項目です。出典と取得日時を併記しています。
               </li>
               <li>
-                <strong>代理指標</strong>：直接の権威データが存在しないため、他のデータから推し量った参考値です。
+                <strong>補助情報</strong>：当該基準を直接評価していない補助情報です。
                 <strong>判定ではありません。</strong>
               </li>
               <li>
@@ -507,12 +507,12 @@ export default function LeapReport() {
               本書は一次スクリーニングであり、環境影響評価法に基づく法定アセスメントの代替ではありません。
             </li>
             <li>
-              衛星データは変化の<strong>有無</strong>を示しますが、<strong>原因</strong>
+              衛星データから特徴量の差を算出しています。生態系の変化の確定や、その<strong>原因</strong>
               （伐採・災害・病虫害・季節差）は判定できません。原因の特定には現地確認が必要です。
             </li>
             <li>
-              感度の高い地域5基準のうち3基準（生物多様性重要地域・水リスク・生態系サービス）は、
-              公的データ未接続のため判定していません。
+              感度の高い地域の評価には、公開情報の照合に加え、現地情報と専門家の確認が必要です。
+              各項目の未判定・補助情報の区分を確認してください。
             </li>
             <li>生態系サービスへの依存の評価、および重要性（materiality）の判定は本システムの対象外です。</li>
             <li>本書の内容は、社内の確認者による承認と専門家レビューを経てから開示にご利用ください。</li>
@@ -701,8 +701,8 @@ function PublicDataPanel({
 
       {none && !checking && (
         <p className="px-3 py-2 text-[11px] text-slate-700 leading-relaxed">
-          国の公開データと照合すると、下表の「生物多様性にとって重要な地域」「物理的な水リスクが高い地域」を
-          <strong>判定済</strong>にできます。所要 10〜30 秒です。
+          公開データを照会し、生物多様性や水リスクの参考情報を取得します。
+          情報が取得できない項目は未判定のままとなります。
           {!point && <span className="text-rose-600 font-medium">（対象地の座標が未設定のため実行できません）</span>}
         </p>
       )}

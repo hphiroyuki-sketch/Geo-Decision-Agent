@@ -35,7 +35,7 @@ dashboardRoutes.get("/", async (c) => {
               (SELECT COUNT(*) FROM mesh_cells mc JOIN meshes m ON m.id = mc.mesh_id
                 WHERE m.project_id = p.id) AS total_cells,
               (SELECT COUNT(*) FROM site_candidates WHERE project_id = p.id) AS candidates,
-              (SELECT COUNT(*) FROM field_records WHERE project_id = p.id) AS field_records
+              (SELECT COUNT(*) FROM field_records WHERE project_id = p.id AND demo=0 AND source='field') AS field_records
        FROM projects p LEFT JOIN users u ON u.id = p.created_by
        ORDER BY p.updated_at DESC`,
     ).all(),
@@ -49,7 +49,7 @@ dashboardRoutes.get("/", async (c) => {
        FROM mesh_hotspots GROUP BY cell_class`,
     ).all<{ cell_class: string; n: number; area_ha: number }>(),
     c.env.DB.prepare(
-      `SELECT review_status, COUNT(*) AS n FROM field_records GROUP BY review_status`,
+      `SELECT review_status, COUNT(*) AS n FROM field_records WHERE demo=0 AND source='field' GROUP BY review_status`,
     ).all<{ review_status: string; n: number }>(),
     c.env.DB.prepare(
       `SELECT status, COUNT(*) AS n FROM recovery_actions GROUP BY status`,
@@ -66,10 +66,10 @@ dashboardRoutes.get("/", async (c) => {
   const kpis = [
     {
       key: "monitored",
-      label: "監視区画",
+      label: "取得セル（累計）",
       value: meshStats?.sampled_cells ?? 0,
       unit: "セル",
-      sub: `${(meshStats?.monitored_ha ?? 0).toFixed(2)} ha を10mメッシュで監視`,
+      sub: `${(meshStats?.monitored_ha ?? 0).toFixed(2)} ha 相当（解析範囲の重複を含む）`,
       tone: "info" as const,
     },
     {
@@ -310,7 +310,7 @@ dashboardRoutes.get("/recovery-actions", async (c) => {
 /** Field data across projects (the "データ" screen). */
 dashboardRoutes.get("/field-records", async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT f.id, f.lat, f.lng, f.species_guess, f.taxon_confidence, f.notes, f.photo_key,
+    `SELECT f.id, f.lat, f.lng, f.species_guess, f.taxon_confidence, f.notes, f.photo_key, f.photo_content_type, f.demo, f.source,
             f.captured_at, f.review_status, p.id AS project_id, p.name AS project_name, u.name AS observer_name
      FROM field_records f JOIN projects p ON p.id = f.project_id JOIN users u ON u.id = f.observer_id
      ORDER BY f.captured_at DESC LIMIT 200`,

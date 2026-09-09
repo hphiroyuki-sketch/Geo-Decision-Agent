@@ -223,3 +223,4 @@ input[type="range"]::-webkit-slider-thumb {
 .organism-note { font-size: 11px; margin-top: 12px; color: #536575; }
 .organism-detail { display: block; margin-top: 12px; font-weight: 600; }
 .organism-no-photo { padding: 28px 12px; background: #eaf1ed; text-align: center; color: #4a625d; }
+.maplibregl-popup { z-index: 40; }

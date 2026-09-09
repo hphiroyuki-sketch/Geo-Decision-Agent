@@ -20,11 +20,13 @@ const STATUS_LABEL: Record<string, string> = { draft: "下書き", reviewed: "�
 export default function ReportsIndex() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<{id:string;name:string}[]>([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api
-      .get<{ reports: ReportRow[] }>("/dashboard/reports")
-      .then((r) => setReports(r.reports))
+    Promise.all([api.get<{ reports: ReportRow[] }>("/dashboard/reports"), api.get<{projects:{id:string;name:string}[]}>("/projects")])
+      .then(([r,p]) => {setReports(r.reports);setProjects(p.projects);})
+      .catch(() => setError("レポートを取得できませんでした。ページを再読み込みしてください。"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -38,6 +40,12 @@ export default function ReportsIndex() {
         </p>
       </div>
 
+      {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
+      <section className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3">
+        <h2 className="font-semibold text-emerald-950">TNFD・自然共生サイトの準備を進める</h2>
+        <p className="text-sm text-slate-700">拠点ごとに本文・根拠・担当・期限を整理し、履歴を残して下書きを出力できます。</p>
+        {projects.map(p=><Link key={p.id} to={`/projects/${p.id}/disclosure`} className="block rounded-lg bg-white p-3 text-sm text-emerald-800 border border-emerald-200 hover:bg-emerald-100">{p.name} → 開示・申請準備</Link>)}
+      </section>
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
         {reports.map((r) => (
           <Link key={r.id} to={`/projects/${r.project_id}/report`} className="block px-4 py-3 hover:bg-slate-50">

@@ -11,6 +11,9 @@ interface RecordRow {
   taxon_confidence: string | null;
   notes: string | null;
   photo_key: string | null;
+  photo_content_type: string | null;
+  demo: number;
+  source: string;
   captured_at: string;
   review_status: string;
   project_id: string;
@@ -36,7 +39,7 @@ export default function DataCatalog() {
   }, []);
 
   const counts = {
-    confirmed: records.filter((r) => r.review_status === "confirmed").length,
+    confirmed: records.filter((r) => r.review_status === "confirmed" && !r.demo && r.source === "field").length,
     unreviewed: records.filter((r) => r.review_status === "unreviewed").length,
     rejected: records.filter((r) => r.review_status === "rejected").length,
   };
@@ -47,13 +50,13 @@ export default function DataCatalog() {
         <div className="text-xs text-slate-400">データ</div>
         <h1 className="text-lg font-semibold text-slate-800">現地データカタログ</h1>
         <p className="text-xs text-slate-500 mt-1">
-          全プロジェクトの現地記録（写真・GPS・種）。確認済みの記録だけが、衛星エンベディングの基準ベクトルと分析の根拠に使われます。
+          全プロジェクトの写真・動画・位置・種の記録。比較用デモや地図指定は、実地の生息証拠と区別します。
         </p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-3">
-          <div className="text-[11px] text-slate-500">確認済み（分析に反映）</div>
+          <div className="text-[11px] text-slate-500">実地記録・レビュー済み</div>
           <div className="text-xl font-semibold text-green-700">{counts.confirmed}</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3">
@@ -72,7 +75,7 @@ export default function DataCatalog() {
           const Icon = status.icon;
           return (
             <div key={r.id} className="flex gap-3 p-3">
-              {r.photo_key && (
+              {r.photo_key && (r.photo_content_type?.startsWith('video/') ? <video controls preload="metadata" src={`/api/field-records/${r.id}/photo`} aria-label={r.species_guess ?? '現地動画'} className="w-24 h-20 rounded-lg shrink-0"/> :
                 <img
                   src={`/api/field-records/${r.id}/photo`}
                   alt={r.species_guess ?? "現地写真"}
@@ -84,7 +87,7 @@ export default function DataCatalog() {
                   <div className="text-sm font-medium text-slate-800 truncate">{r.species_guess ?? "種未記入"}</div>
                   <span className={`shrink-0 text-[11px] flex items-center gap-1 font-medium ${status.className}`}>
                     <Icon size={13} />
-                    {status.label}
+                    {r.demo ? 'デモ・実地観測ではありません' : r.source === 'map_pin' ? '地図指定' : status.label}
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">

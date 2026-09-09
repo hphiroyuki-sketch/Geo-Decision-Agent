@@ -226,7 +226,7 @@ export default function ProjectChat() {
   const TABS = [
     { key: "chat" as const, label: "AI調査", icon: MessageSquare },
     { key: "map" as const, label: "地図", icon: MapIcon },
-    { key: "rank" as const, label: `候補地${candidates.length ? ` ${candidates.length}` : ""}`, icon: ListOrdered },
+    { key: "rank" as const, label: "次の作業", icon: ListOrdered },
   ];
 
   return (
@@ -432,12 +432,20 @@ export default function ProjectChat() {
         className={`${mobileView === "rank" ? "flex" : "hidden"} lg:flex w-full lg:w-[300px] xl:w-[340px] lg:shrink-0 border-l border-slate-200 bg-white flex-col flex-1 lg:flex-none min-h-0`}
       >
         <div className="px-3.5 py-3 border-b border-slate-100">
-          <div className="text-sm font-medium text-slate-800">候補地ランキング</div>
-          <p className="mt-2 rounded bg-amber-50 p-2 text-[11px] text-amber-900">総合スコアは比較用デモです。生息地重複・保護区距離・連結性・アクセスに仮値が含まれるため、立地判断や申請の根拠には使えません。実データの確認は10mメッシュへ進んでください。</p>
-          <div className="text-[10px] text-slate-400">総合スコアの高い順。タップで地図が移動します。</div>
+          <div className="text-sm font-semibold text-slate-800">調査から開示へ</div>
+          <p className="text-xs text-slate-600 mt-2">衛星で絞り、現地で確かめ、次の活動と説明資料につなげます。</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
+          <div className="space-y-3 mb-5">
+            {[
+              {n:"01",title:"衛星から調査候補を探す",text:"10mの環境の違いと変化を確認",path:"mesh"},
+              {n:"02",title:"現地の証拠を集める",text:"写真・動画、種名、確認状態を記録",path:"field"},
+              {n:"03",title:"活動と開示の準備を進める",text:"不足する根拠・担当・期限を整理",path:"disclosure"},
+            ].map(step=><Link key={step.n} to={`/projects/${id}/${step.path}`} className="block border border-slate-200 rounded-xl p-3 hover:border-emerald-500"><span className="text-xs font-semibold text-emerald-700">{step.n}</span><h3 className="text-sm font-semibold text-slate-800 mt-1">{step.title} →</h3><p className="text-xs text-slate-500 mt-1">{step.text}</p></Link>)}
+          </div>
+          <details><summary className="text-xs text-slate-500 cursor-pointer">以前の候補地比較（デモ）</summary>
+          <p className="text-[11px] text-amber-900 bg-amber-50 p-2 my-2">総合スコアには仮値を含みます。立地判断・開示には使用できません。</p>
           {candidates.map((c) => (
             <RankCard
               key={c.id}
@@ -460,12 +468,13 @@ export default function ProjectChat() {
             <div className="text-center py-10 px-3">
               <ListOrdered size={22} className="mx-auto text-slate-300 mb-2" />
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                まだ候補地がありません。
+                比較デモの履歴はありません。
                 <br />
-                左のAI調査で「この2地点を比較して」のように依頼すると、ここに順位が並びます。
+                実データの調査は上の3つの作業から進めてください。
               </p>
             </div>
           )}
+          </details>
         </div>
 
         <div className="p-3 border-t border-slate-100 grid grid-cols-2 gap-2">

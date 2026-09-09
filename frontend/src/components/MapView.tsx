@@ -182,6 +182,7 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
       id,
       type: "raster" as const,
       source: id,
+      minzoom: id === "esri" ? 0 : 8,
       layout: { visibility: "none" as const },
     })),
     { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.85 } },
@@ -480,23 +481,40 @@ export default function MapView({
     }
 
     mapRef.current = map;
+    const renderError = (event: ErrorEvent) => { container.dataset.renderError = event.message; };
+    window.addEventListener('error', renderError);
+    map.once('remove', () => window.removeEventListener('error', renderError));
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    console.error = (...args) => { container.dataset.consoleError = args.map(String).join(' ').slice(0,2000); originalError(...args); };
+    console.warn = (...args) => { container.dataset.consoleWarn = args.map(String).join(' ').slice(0,2000); originalWarn(...args); };
+    const rejection = (e:PromiseRejectionEvent) => { container.dataset.rejection = String(e.reason); };
+    window.addEventListener('unhandledrejection', rejection);
+    map.once('remove', () => { console.error = originalError; console.warn = originalWarn; window.removeEventListener('unhandledrejection', rejection); });
 
     // DOM diagnostics also let acceptance checks distinguish a mounted layer
     // from cells that the WebGL renderer actually drew.
     const reportRender = () => {
       container.dataset.mapZoom = map.getZoom().toFixed(3);
+      container.dataset.mapPitch = map.getPitch().toFixed(2);
+      container.dataset.mapElevation = String(map.getCenterElevation());
+      container.dataset.mapProjection = JSON.stringify(map.getProjection()?.type ?? "pending");
+      container.dataset.mapTerrain = JSON.stringify(map.getTerrain());
+      container.dataset.demLoaded = String(Boolean(map.getSource(DEM_SOURCE_ID)) && map.isSourceLoaded(DEM_SOURCE_ID));
       container.dataset.meshSourceLoaded = String(Boolean(map.getSource(MESH_SOURCE)) && map.isSourceLoaded(MESH_SOURCE));
       if (map.getLayer("mesh-fill")) {
         container.dataset.meshRendered = String(map.queryRenderedFeatures({ layers: ["mesh-fill"] }).length);
       }
     };
     map.on("idle", reportRender);
+    map.on("moveend", reportRender);
     map.on("sourcedata", (event) => {
       if (event.sourceId === MESH_SOURCE && event.isSourceLoaded) {
         onOverlayStatusRef.current?.(true);
       }
     });
     map.on("error", (event) => {
+      container.dataset.mapError = event.error.message;
       if ((event as { sourceId?: string }).sourceId === MESH_SOURCE) {
         container.dataset.meshError = event.error.message;
         onOverlayStatusRef.current?.(false);
@@ -598,17 +616,30 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    return whenStyleReady(map, () => {
+    let projection: string | null = null;
+    const syncProjection = () => {
+      const type = globe && map.getZoom() < 8 ? "globe" : "mercator";
+      if (projection === type) return;
+      const rebuildTerrain = projection === "globe" && type === "mercator" && Boolean(map.getTerrain());
+      if (rebuildTerrain) {
+        map.setTerrain(null);
+        if (map.getSource(DEM_SOURCE_ID)) map.removeSource(DEM_SOURCE_ID);
+      }
+      projection = type;
+      map.setProjection({ type });
+      map.setSky(type === "globe" ? { "sky-color": "#071321", "horizon-color": "#87b8db", "sky-horizon-blend": 0.5, "atmosphere-blend": 0.85 } : { "atmosphere-blend": 0, "horizon-fog-blend": 0, "sky-horizon-blend": 0 });
+      if (rebuildTerrain && ensureTerrainSource(map)) map.setTerrain({source:DEM_SOURCE_ID,exaggeration:terrainExaggeration});
+    };
+    const cancel = whenStyleReady(map, () => {
       try {
-        map.setProjection({
-          type: globe ? "globe" : "mercator",
-        });
-        map.setSky({ "sky-color": "#071321", "horizon-color": "#87b8db", "sky-horizon-blend": 0.5, "atmosphere-blend": globe ? 0.85 : 0 });
+        syncProjection();
+        map.on("zoom", syncProjection);
       } catch (err) {
         // An older renderer just stays flat; nothing else depends on this.
         console.error("projection unavailable", err);
       }
     });
+    return () => { cancel(); map.off("zoom", syncProjection); };
   }, [globe]);
 
   // The opening flight: start far out, then descend to the target.
@@ -669,24 +700,27 @@ export default function MapView({
     if (!map) return;
     let terrainActive = false;
     const sync = () => {
-      // Global DEM tessellation produces seams at globe scale. Use the sphere
-      // there and enable terrain only once the user reaches a regional view.
-      const enable = terrain3d && map.getZoom() >= 9;
+      const enable = terrain3d;
       if (enable !== terrainActive) {
         terrainActive = enable;
         if (enable && ensureTerrainSource(map)) map.setTerrain({ source: DEM_SOURCE_ID, exaggeration: terrainExaggeration });
         else map.setTerrain(null);
+        map.triggerRepaint();
       }
-      if (globe && map.getZoom() < 6 && map.getPitch() > 0) map.setPitch(0);
+
     };
+    const normalizePitch = () => { if (globe && map.getZoom() < 6 && map.getPitch() > 0) map.setPitch(0); };
     const cancel = whenStyleReady(map, () => {
       map.setTerrain(null);
       sync();
       if (terrain3d && map.getZoom() >= 9 && map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 800 });
       if (!terrain3d && map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
-      map.on("zoom", sync);
+      // Changing terrain during a globe-to-site camera animation can leave
+      // render-to-texture tiles stale. Apply it after the camera settles.
+      map.on("moveend", sync);
+      map.on("zoomend", normalizePitch);
     });
-    return () => { cancel(); map.off("zoom", sync); };
+    return () => { cancel(); map.off("moveend", sync); map.off("zoomend", normalizePitch); };
   }, [terrain3d, terrainExaggeration, globe]);
 
   useEffect(() => {
@@ -742,5 +776,9 @@ export default function MapView({
     return () => { cleanup.forEach(fn => fn()); markerRefs.current.forEach(m => m.remove()); };
   }, [markers]);
 
-  return <div ref={containerRef} className={className ?? "w-full h-full"} />;
+  return <div className={`relative ${className ?? "w-full h-full"}`}>
+    <div ref={containerRef} className="absolute inset-0" style={{background: "#071321", position: "absolute", width: "100%", height: "100%"}} />
+    {globe && chrome && <button type="button" onClick={() => mapRef.current?.flyTo({zoom: 1.1, pitch: 0, bearing: 0, duration: 1800})}
+      className="absolute bottom-12 left-3 z-10 rounded-full border border-white/30 bg-slate-950/85 text-white px-3 py-2 text-xs shadow-lg hover:bg-slate-800" aria-label="地球全体を表示">◎ 地球全体</button>}
+  </div>;
 }
