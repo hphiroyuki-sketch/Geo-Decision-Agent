@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geo Decision ER図</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f4ef; --card:#ffffff; --ink:#1f2330; --mute:#5d6475; --line:#8a90a0; --soft:#e7e3d8; --pill:#ffffff;
+  --box:#ffffff; --accent:#3b4fd4;
+  --c1:#4f5bd5; --c2:#2e9b63; --c3:#c98a0f; --c4:#1b8f9c; --c5:#cc5a33; --c6:#8250c4; --c7:#677085;
+  --warn-bg:#fff6dd; --warn-ink:#6b4b00;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14161d; --card:#1d202a; --ink:#eceef4; --mute:#a3a9ba; --line:#6f7690; --soft:#2c303d; --pill:#1d202a;
+    --box:#232736; --accent:#8d9bff;
+    --c1:#8b95ff; --c2:#5fd197; --c3:#f0b84a; --c4:#4cc9d6; --c5:#ff8c66; --c6:#b68cf2; --c7:#a3adc2;
+    --warn-bg:#3a3118; --warn-ink:#f3d98a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14161d; --card:#1d202a; --ink:#eceef4; --mute:#a3a9ba; --line:#6f7690; --soft:#2c303d; --pill:#1d202a;
+  --box:#232736; --accent:#8d9bff;
+  --c1:#8b95ff; --c2:#5fd197; --c3:#f0b84a; --c4:#4cc9d6; --c5:#ff8c66; --c6:#b68cf2; --c7:#a3adc2;
+  --warn-bg:#3a3118; --warn-ink:#f3d98a;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Zen Kaku Gothic New","Noto Sans JP",system-ui,sans-serif;line-height:1.75;font-size:16px}
+.wrap{max-width:1500px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:clamp(24px,3.2vw,36px);line-height:1.3;margin:0 0 6px;font-weight:700}
+.lead{color:var(--mute);margin:0 0 18px;max-width:60em}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 20px;padding:0;list-style:none}
+.stats li{background:var(--card);border:1px solid var(--soft);border-radius:12px;padding:8px 16px}
+.stats b{font-size:22px;font-variant-numeric:tabular-nums;margin-right:4px}
+.stats span{color:var(--mute);font-size:13px}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start}
+@media (max-width:1100px){.stage{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--soft);border-radius:16px}
+.figcard{padding:12px 12px 8px}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.steps button{font:inherit;font-size:14px;border:1.5px solid var(--soft);background:var(--bg);color:var(--ink);border-radius:999px;padding:5px 12px;cursor:pointer;line-height:1.4}
+.steps button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.steps button:focus-visible,.nav button:focus-visible,.chip:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.steps i{font-style:normal;display:inline-block;width:18px;height:18px;border-radius:50%;line-height:18px;text-align:center;font-size:11px;font-weight:700;color:#fff;margin-right:5px}
+.fig-scroll{overflow-x:auto}
+.fs{margin-left:auto;font:inherit;font-size:14px;border:1.5px solid var(--soft);background:var(--card);color:var(--ink);border-radius:999px;padding:5px 12px;cursor:pointer}
+.stage:fullscreen{background:var(--bg);padding:16px;overflow:auto;align-content:start}
+.stage:fullscreen svg.er{min-width:0}
+figure{margin:0}
+svg.er{display:block;width:100%;min-width:900px;height:auto}
+figcaption{font-size:13px;color:var(--mute);padding:8px 4px 4px}
+/* --- svg parts (styles live in the page, not inside the svg) --- */
+.er text{font-family:"Zen Kaku Gothic New","Noto Sans JP",sans-serif;fill:var(--ink)}
+.er .bg{fill:var(--box);stroke:var(--line);stroke-width:1.3}
+.er .tj{font-size:16px;font-weight:700}
+.er .te{font-size:12px;font-family:"JetBrains Mono",ui-monospace,monospace;fill:var(--mute)}
+.er .tc{font-size:11.5px;fill:var(--mute)}
+.er .bn{font-size:11px;font-weight:700;fill:#fff}
+.er .tbl{cursor:pointer;transition:opacity .25s}
+.er .tbl:hover .bg,.er .tbl:focus-visible .bg{stroke:var(--ink);stroke-width:2.4}
+.er .tbl:focus{outline:none}
+.er .tbl.sel .bg{stroke:var(--ink);stroke-width:3}
+.er .tbl.s1 .bar,.er .tbl.s1 .badge{fill:var(--c1)} .er .tbl.s2 .bar,.er .tbl.s2 .badge{fill:var(--c2)}
+.er .tbl.s3 .bar,.er .tbl.s3 .badge{fill:var(--c3)} .er .tbl.s4 .bar,.er .tbl.s4 .badge{fill:var(--c4)}
+.er .tbl.s5 .bar,.er .tbl.s5 .badge{fill:var(--c5)} .er .tbl.s6 .bar,.er .tbl.s6 .badge{fill:var(--c6)}
+.er .tbl.s7 .bar,.er .tbl.s7 .badge{fill:var(--c7)}
+.er .zone rect{fill-opacity:.07;stroke-opacity:.45;stroke-width:1.5;stroke-dasharray:0}
+.er .zone text{font-size:15px;font-weight:700;letter-spacing:.04em;paint-order:stroke;stroke:var(--card);stroke-width:6px;stroke-linejoin:round}
+.er .zone{transition:opacity .25s}
+.er .z1 rect{fill:var(--c1);stroke:var(--c1)} .er .z1 text{fill:var(--c1)}
+.er .z2 rect{fill:var(--c2);stroke:var(--c2)} .er .z2 text{fill:var(--c2)}
+.er .z3 rect{fill:var(--c3);stroke:var(--c3)} .er .z3 text{fill:var(--c3)}
+.er .z4 rect{fill:var(--c4);stroke:var(--c4)} .er .z4 text{fill:var(--c4)}
+.er .z5 rect{fill:var(--c5);stroke:var(--c5)} .er .z5 text{fill:var(--c5)}
+.er .z6 rect{fill:var(--c6);stroke:var(--c6)} .er .z6 text{fill:var(--c6)}
+.er .z7 rect{fill:var(--c7);stroke:var(--c7)} .er .z7 text{fill:var(--c7)}
+.er.dim .zone{opacity:.25}
+.er.dim .zone.on{opacity:1}
+.er.dim .zone.on rect{fill-opacity:.11}
+.er .rel{transition:opacity .25s}
+.er .rel polyline{fill:none;stroke:var(--line);stroke-width:1.7}
+.er .rel.logical polyline{stroke-dasharray:7 5}
+.er .rel.cache polyline{stroke-dasharray:2 5;stroke-linecap:round;stroke-width:2.2}
+.er .rel .ah{fill:var(--line)}
+.er .rel .pill{fill:var(--pill);stroke:var(--soft)}
+.er .rel .rl{font-size:12.5px}
+.er .rel .crd{font-size:12px;font-weight:700;fill:var(--mute);font-family:"JetBrains Mono",monospace}
+.er.dim .tbl:not(.on){opacity:.16}
+.er.dim .rel{opacity:.07}
+.er.dim .rel.on{opacity:1}
+.er.dim .rel.on polyline{stroke:var(--ink);stroke-width:2.2}
+.er.dim .rel.on .ah{fill:var(--ink)}
+.er.dim .rel.half{opacity:.35}
+.legend{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px;color:var(--mute);padding:6px 4px 2px;align-items:center}
+.legend svg{width:46px;height:10px;vertical-align:middle;margin-right:6px}
+.legend line{stroke:var(--line);stroke-width:2}
+.legend code{font-family:"JetBrains Mono",monospace;font-weight:500;color:var(--ink)}
+/* --- side panel --- */
+.panel{padding:20px 20px 18px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+@media (max-width:1100px){.panel{position:static;max-height:none}}
+.kick{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute);margin:0 0 4px}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.panel h2{font-size:23px;line-height:1.35;margin:0 0 10px}
+.panel h3{font-size:13px;letter-spacing:.04em;color:var(--mute);margin:16px 0 4px;font-weight:700}
+.panel p{margin:0 0 6px}
+.say{border-left:5px solid var(--c1);padding:2px 0 2px 12px}
+.pro{border-left:5px solid var(--line);padding:2px 0 2px 12px;color:var(--ink);font-size:14.5px}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{font:inherit;font-size:13.5px;border:1.5px solid var(--soft);background:var(--bg);color:var(--ink);border-radius:8px;padding:2px 9px;cursor:pointer}
+.chip:hover{border-color:var(--ink)}
+.nav{display:flex;gap:8px;margin-top:14px}
+.nav button{font:inherit;font-size:14px;border:1.5px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:10px;padding:6px 14px;cursor:pointer}
+.nav button.ghost{background:transparent;color:var(--ink)}
+.nav button[disabled]{opacity:.35;cursor:default}
+table.cols{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}
+table.cols td{padding:5px 6px;border-top:1px solid var(--soft);vertical-align:top}
+table.cols td:first-child{white-space:nowrap}
+.tag{font-size:10.5px;font-weight:700;border-radius:5px;padding:0 5px;margin-left:4px;color:#fff;background:var(--c7);vertical-align:1px}
+.tag.pk{background:#b4881a}.tag.fk{background:#2f6fd1}.tag.lg{background:#8a6bb8}.tag.uq{background:#2e8b6a}
+.rest{font-size:12.5px;color:var(--mute);word-break:break-all}
+.ex{background:var(--bg);border-radius:10px;padding:6px 10px;font-size:14px}
+details summary{cursor:pointer;color:var(--mute);font-size:13px}
+/* --- points --- */
+section.pts{margin-top:36px}
+section.pts h2{font-size:24px;margin:0 0 4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:14px}
+.pt{padding:16px 18px}
+.pt h3{font-size:17px;margin:0 0 6px;line-height:1.4}
+.pt p{margin:0 0 8px;font-size:15px}
+.pt .x{font-size:13.5px;color:var(--mute);margin:0}
+.pt .n{display:inline-block;background:var(--ink);color:var(--bg);width:24px;height:24px;border-radius:50%;text-align:center;line-height:24px;font-size:13px;font-weight:700;margin-right:8px}
+.gloss{padding:12px 18px;margin:0 0 16px}
+.gloss summary{cursor:pointer;font-weight:700}
+.gloss dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 18px;margin:10px 0 4px}
+.gloss dt{font-weight:700}
+.gloss dd{margin:0;color:var(--mute);font-size:14.5px}
+.foot{margin-top:26px;font-size:13px;color:var(--mute)}
+.foot p{margin:0 0 6px}
+.warn{background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;padding:8px 12px;font-size:13.5px}
+@media (prefers-reduced-motion: reduce){.er .tbl,.er .rel{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Geo Decision Agent ─ データの仕組み</h1>
+  <p class="lead">このシステムが「何を、どんな順番で、どこに記録しているか」を1枚にまとめた図です。四角が「記録の表（テーブル）」、線が「つながり」。四角をクリックすると、中学生向けのやさしい説明と専門家向けの詳しい説明が右に出ます。</p>
+  <ul class="stats" aria-label="スキーマの規模">
+    <li><b>__S_TABLES__</b><span>テーブル</span></li>
+    <li><b>__S_COLS__</b><span>列</span></li>
+    <li><b>__S_FKS__</b><span>外部キー</span></li>
+    <li><b>__S_MIGS__</b><span>マイグレーション</span></li>
+  </ul>
+  <details class="card gloss" open>
+    <summary>はじめての人へ：この図に出てくる4つの言葉</summary>
+    <dl>
+      <div><dt>テーブル（表）</dt><dd>同じ種類の記録を並べた表。Excelの1枚のシートのようなもの。図の四角1つが1つのテーブル。</dd></div>
+      <div><dt>列</dt><dd>表の見出し。「名前」「メール」のように、1行ごとに埋める項目。</dd></div>
+      <div><dt>外部キー</dt><dd>「この記録はあの記録のもの」という結びつき。存在しない案件に現地記録をぶら下げるといった矛盾を、データベース自身が止める。</dd></div>
+      <div><dt>キャッシュ</dt><dd>一度調べた答えのメモ。同じ場所・同じ年なら、衛星にもう一度聞かずにメモを使う。</dd></div>
+    </dl>
+  </details>
+  <div class="stage">
+    <div class="card figcard">
+      <div class="steps" id="steps" role="group" aria-label="説明のステップ"></div>
+      <div class="fig-scroll">
+      <figure>
+        <svg class="er" id="er" viewBox="0 0 __VBW__ __VBH__" role="img" aria-label="25のテーブルの関係図。利用者から案件、案件から現地記録・メッシュ解析・候補地・レポート・通知へとつながる">
+          <title>Geo Decision Agent の ER 図</title>
+__SVG__
+        </svg>
+        <figcaption>色のついた区画が①〜⑦の役割。真ん中の「案件」から、上へ「AIと決める」、右へ「現地の証拠」、下へ「宇宙からの測定」と「結果を行動に」が広がります。線のそばの <b>1</b> は“1つ”、<b>N</b> は“たくさん”。例：1つの案件に、たくさんの現地記録。</figcaption>
+      </figure>
+      </div>
+      <div class="legend" aria-label="凡例">
+        <span><svg viewBox="0 0 46 10" aria-hidden="true"><line x1="0" y1="5" x2="46" y2="5"/></svg>実線：データベースが約束を守らせる“外部キー”</span>
+        <span><svg viewBox="0 0 46 10" aria-hidden="true"><line x1="0" y1="5" x2="46" y2="5" stroke-dasharray="7 5"/></svg>破線：つながっているが、約束は設けていない</span>
+        <span><svg viewBox="0 0 46 10" aria-hidden="true"><line x1="0" y1="5" x2="46" y2="5" stroke-dasharray="2 5" stroke-linecap="round"/></svg>点線：座標と年でメモを引く（キャッシュ）</span>
+        <span>矢印は「親 → 子」</span>
+      </div>
+    </div>
+    <aside class="card panel" id="panel" aria-live="polite"></aside>
+  </div>
+
+  <section class="pts">
+    <h2>この設計のポイント</h2>
+    <p class="lead">図を見るだけでは分からない「なぜこう作ったか」です。出力は企業に渡すスクリーニング文書になるので、データの持ち方そのものが信頼性の条件になります。</p>
+    <div class="grid">
+      <div class="card pt"><h3><span class="n">1</span>失敗も「事実」として残す</h3>
+        <p>公的データに聞けなかったとき、「何もなかった」と書かずに「聞けなかった」と記録します。報告書では「判定不可」と表示されます。</p>
+        <p class="x">専門家向け：<span class="mono">public_data_cache.status</span> = ok / failed / busy / empty。失敗は1時間、成功は30日で失効。</p></div>
+      <div class="card pt"><h3><span class="n">2</span>推定を測定と偽らない</h3>
+        <p>デモのデータ、地図上でクリックしただけの点、衛星が使えず推定で出した数字は、列で区別して、混ざらないようにしています。</p>
+        <p class="x">専門家向け：<span class="mono">field_records.demo / source</span>、<span class="mono">site_candidates.ndre_measured</span>、<span class="mono">analyses.earth_engine_available</span>。</p></div>
+      <div class="card pt"><h3><span class="n">3</span>あとから同じ結果を再現できる</h3>
+        <p>AIの種類・ルールの版・使った衛星データの年を、分析のたびに記録します。「同じ分析ID＝同じ条件」と言えるようにするためです。</p>
+        <p class="x">専門家向け：<span class="mono">analyses</span>（model / prompt_version / engine_version / earth_engine_year / inputs_json / replay_of）。</p></div>
+      <div class="card pt"><h3><span class="n">4</span>「約束するつながり」と「引くだけのメモ」を分ける</h3>
+        <p>案件とその記録は、データベースが整合性を守る強いつながり。衛星のメモは座標と年で引くだけなので、案件が消えても使い回せます。</p>
+        <p class="x">専門家向け：<span class="mono">embedding_cache / indices_cache / public_data_cache</span> は (lat,lng,year) キーで外部キーなし。約100m丸めで近い拠点が同じ行を共有。</p></div>
+    </div>
+    <div class="foot">
+      <p class="warn">図に描いていないもの：__NOTE__</p>
+      <p>ほかに、<span class="mono">invites.created_by / used_by</span>、<span class="mono">mesh_cells.hotspot_id</span>、<span class="mono">site_candidates.analysis_id</span> は“つながっている列”ですが外部キーの宣言はありません（破線で示したもの、および図では省略したもの）。</p>
+      <p>この図は <span class="mono">migrations/0001〜0009</span> を機械的に読み取って生成しています（<span class="mono">docs/er-diagram/build.py</span>）。列名や外部キーを手で書き写してはいません。</p>
+    </div>
+  </section>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function(){
+var D = JSON.parse(document.getElementById('data').textContent);
+var svg = document.getElementById('er'), panel = document.getElementById('panel'), stepsEl = document.getElementById('steps');
+var BASE = svg.viewBox.baseVal; var BW = BASE.width, BH = BASE.height, ASPECT = BW / BH;
+var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+var step = 0, sel = null;
+var tbls = {}, rels = [];
+[].forEach.call(svg.querySelectorAll('.tbl'), function(g){ tbls[g.dataset.t] = g; });
+[].forEach.call(svg.querySelectorAll('.rel'), function(g){ rels.push(g); });
+
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function col(n){ return 'var(--c' + n + ')'; }
+
+/* ---- step buttons ---- */
+function buildSteps(){
+  var h = '<button type="button" data-s="0" aria-pressed="true">全体</button>';
+  D.steps.forEach(function(s){ h += '<button type="button" data-s="' + s.n + '" aria-pressed="false"><i style="background:' + col(s.n) + '">' + s.n + '</i>' + esc(s.title) + '</button>'; });
+  stepsEl.innerHTML = h + (document.documentElement.requestFullscreen ? '<button type="button" class="fs" id="fs">全画面で発表</button>' : '');
+  var fs = document.getElementById('fs'); if(fs) fs.onclick = function(){ var st = document.querySelector('.stage'); if(document.fullscreenElement) document.exitFullscreen(); else st.requestFullscreen(); };
+  stepsEl.addEventListener('click', function(e){ var b = e.target.closest('button[data-s]'); if(b) go(+b.dataset.s); });
+}
+
+/* ---- animated viewBox ---- */
+var cur = {x:0, y:0, w:BW, h:BH}, raf = 0;
+function setVB(v){ cur = v; svg.setAttribute('viewBox', v.x + ' ' + v.y + ' ' + v.w + ' ' + v.h); }
+function target(names){
+  if(!names.length) return {x:0, y:0, w:BW, h:BH};
+  var x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  names.forEach(function(n){ var r = tbls[n].querySelector('.bg'); var x = +r.getAttribute('x'), y = +r.getAttribute('y'), w = +r.getAttribute('width'), h = +r.getAttribute('height');
+    x1 = Math.min(x1, x); y1 = Math.min(y1, y); x2 = Math.max(x2, x + w); y2 = Math.max(y2, y + h); });
+  var pad = 60; x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
+  var w = x2 - x1, h = y2 - y1;
+  if(w / h < ASPECT){ var nw = h * ASPECT; x1 -= (nw - w) / 2; w = nw; } else { var nh = w / ASPECT; y1 -= (nh - h) / 2; h = nh; }
+  if(w > BW){ w = BW; h = BH; x1 = 0; y1 = 0; }
+  x1 = Math.max(0, Math.min(x1, BW - w)); y1 = Math.max(0, Math.min(y1, BH - h));
+  return {x:x1, y:y1, w:w, h:h};
+}
+function animateTo(t){
+  cancelAnimationFrame(raf);
+  if(reduce){ setVB(t); return; }
+  var from = cur, t0 = null, dur = 650;
+  function ease(p){ return p < .5 ? 2*p*p : 1 - Math.pow(-2*p + 2, 2) / 2; }
+  function tick(ts){ if(t0 === null) t0 = ts; var p = Math.min(1, (ts - t0) / dur), k = ease(p);
+    setVB({x: from.x + (t.x - from.x) * k, y: from.y + (t.y - from.y) * k, w: from.w + (t.w - from.w) * k, h: from.h + (t.h - from.h) * k});
+    if(p < 1) raf = requestAnimationFrame(tick); }
+  raf = requestAnimationFrame(tick);
+}
+
+/* ---- highlighting ---- */
+function focus(set){
+  var on = {}; set.forEach(function(n){ on[n] = 1; });
+  svg.classList.toggle('dim', set.length > 0);
+  Object.keys(tbls).forEach(function(n){ tbls[n].classList.toggle('on', !!on[n]); tbls[n].classList.toggle('sel', n === sel); });
+  [].forEach.call(svg.querySelectorAll('.zone'), function(z){ z.classList.toggle('on', +z.dataset.step === step && !sel); });
+  rels.forEach(function(g){ var a = !!on[g.dataset.from], b = !!on[g.dataset.to];
+    g.classList.toggle('on', a && b); g.classList.toggle('half', (a !== b)); });
+}
+function tablesOf(n){ return Object.keys(D.tables).filter(function(t){ return D.tables[t].step === n; }); }
+
+/* ---- panel ---- */
+function chips(list){ return '<div class="chips">' + list.map(function(t){ return '<button type="button" class="chip" data-t="' + t + '">' + esc(D.tables[t].jp) + '</button>'; }).join('') + '</div>'; }
+function renderOverview(){
+  panel.innerHTML =
+    '<p class="kick">はじめに</p><h2>まず全体の流れ</h2>' +
+    '<p class="say" style="border-color:var(--c1)">このシステムは、<b>「使う人」が「調べる場所（案件）」を登録し、衛星と現地の証拠を突き合わせて、AIと一緒に決めて、その記録を残す</b>しくみです。図はその記録の入れ物を全部描いたものです。</p>' +
+    '<h3>見方</h3><p>① から ⑦ まで順に押すか、キーボードの <b>→ ←</b> で進みます。四角を直接クリックしてもかまいません。</p>' +
+    '<p class="pro">専門家向け：RDB（Cloudflare D1 / SQLite）。25テーブルが7つの役割に分かれ、projects を集約ルートに放射状につながる。</p>' +
+    '<div class="nav"><button type="button" id="start">① から説明する →</button></div>';
+  document.getElementById('start').onclick = function(){ go(1); };
+}
+function renderStep(n){
+  var s = D.steps[n - 1], list = tablesOf(n);
+  panel.innerHTML =
+    '<p class="kick"><span class="dot" style="background:' + col(n) + '"></span>ステップ ' + n + ' / 7</p>' +
+    '<h2>' + esc(s.title) + '</h2>' +
+    '<p class="say" style="border-color:' + col(n) + '">' + esc(s.plain) + '</p>' +
+    '<h3>専門的には</h3><p class="pro">' + esc(s.expert) + '</p>' +
+    '<h3>このステップの表（クリックで詳細）</h3>' + chips(list) +
+    '<div class="nav"><button type="button" class="ghost" id="prev">← 前へ</button><button type="button" id="next"' + (n === 7 ? ' disabled' : '') + '>次へ →</button></div>';
+  document.getElementById('prev').onclick = function(){ go(n - 1); };
+  var nx = document.getElementById('next'); if(n < 7) nx.onclick = function(){ go(n + 1); };
+}
+function relLine(items, dir){
+  if(!items.length) return '<p class="rest">なし</p>';
+  return '<div class="chips">' + items.map(function(it){
+    var t = dir === 'out' ? it[1] : it[0], c = dir === 'out' ? it[0] : it[1];
+    return '<button type="button" class="chip" data-t="' + t + '">' + (dir === 'out' ? esc(c) + ' → ' : '') + esc(D.tables[t].jp) + (dir === 'in' ? '（' + esc(c) + '）' : '') + '</button>'; }).join('') + '</div>';
+}
+function renderTable(id){
+  var t = D.tables[id];
+  var rows = t.key.map(function(c){
+    var tg = '';
+    if(c.pk) tg += '<span class="tag pk">PK</span>';
+    if(c.fk) tg += '<span class="tag fk">FK→' + esc(c.fk) + '</span>';
+    if(c.lg) tg += '<span class="tag lg">論理→' + esc(c.lg) + '</span>';
+    if(c.uq) tg += '<span class="tag uq">一意</span>';
+    return '<tr><td class="mono">' + esc(c.n) + tg + '</td><td>' + esc(c.m) + '</td></tr>'; }).join('');
+  panel.innerHTML =
+    '<p class="kick"><span class="dot" style="background:' + col(t.step) + '"></span>ステップ ' + t.step + '・' + esc(D.steps[t.step - 1].title) + '</p>' +
+    '<h2>' + esc(t.jp) + '</h2><p class="mono" style="margin:-6px 0 8px;color:var(--mute)">' + esc(t.id) + '　' + t.ncol + '列　' + esc(t.mig) + '</p>' +
+    '<p class="say" style="border-color:' + col(t.step) + '">' + esc(t.plain) + '</p>' +
+    '<h3>専門的には</h3><p class="pro">' + esc(t.expert) + '</p>' +
+    '<h3>なぜこう作ったか</h3><p>' + esc(t.why) + '</p>' +
+    '<h3>例</h3><p class="ex">' + esc(t.ex) + '</p>' +
+    '<h3>主な列</h3><table class="cols"><tbody>' + rows + '</tbody></table>' +
+    (t.rest.length ? '<details><summary>ほかの列（' + t.rest.length + '）</summary><p class="rest mono">' + t.rest.map(esc).join('、') + '</p></details>' : '') +
+    '<h3>これが指している先（外部キー）</h3>' + relLine(t.out, 'out') +
+    '<h3>これを指している表</h3>' + relLine(t.in, 'in') +
+    '<div class="nav"><button type="button" class="ghost" id="back">← ステップに戻る</button></div>';
+  document.getElementById('back').onclick = function(){ sel = null; go(step); };
+}
+panel.addEventListener('click', function(e){ var c = e.target.closest('.chip'); if(c) pick(c.dataset.t); });
+
+/* ---- navigation ---- */
+function go(n){
+  step = Math.max(0, Math.min(7, n)); sel = null;
+  [].forEach.call(stepsEl.querySelectorAll('button[data-s]'), function(b){ b.setAttribute('aria-pressed', String(+b.dataset.s === step)); });
+  var set = step ? tablesOf(step) : [];
+  focus(set); animateTo(target(set));
+  if(step) renderStep(step); else renderOverview();
+}
+function pick(id){
+  sel = id;
+  var t = D.tables[id], near = {}; near[id] = 1;
+  t.out.forEach(function(o){ near[o[1]] = 1; }); t.in.forEach(function(o){ near[o[0]] = 1; });
+  D.rels.forEach(function(r){ if(r.p === id) near[r.c] = 1; if(r.c === id) near[r.p] = 1; });
+  var set = Object.keys(near).filter(function(n){ return tbls[n]; });
+  focus(set); animateTo(target(set)); renderTable(id);
+  [].forEach.call(stepsEl.querySelectorAll('button[data-s]'), function(b){ b.setAttribute('aria-pressed', 'false'); });
+  if(window.innerWidth <= 1100) panel.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'nearest'});
+}
+svg.addEventListener('click', function(e){ var g = e.target.closest('.tbl'); if(g) pick(g.dataset.t); });
+svg.addEventListener('keydown', function(e){ if((e.key === 'Enter' || e.key === ' ') && e.target.closest('.tbl')){ e.preventDefault(); pick(e.target.closest('.tbl').dataset.t); } });
+document.addEventListener('keydown', function(e){
+  if(e.target.closest && e.target.closest('details,input,textarea')) return;
+  if(e.key === 'ArrowRight') { if(!sel) go(step + 1); }
+  else if(e.key === 'ArrowLeft') { if(!sel) go(step - 1); }
+  else if(e.key === 'Escape') { if(sel){ sel = null; go(step); } else go(0); }
+});
+buildSteps(); go(0);
+})();
+</script>
+</body>
+</html>

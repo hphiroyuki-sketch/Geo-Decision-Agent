@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geo Decision しくみ図</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+__TOKENS__
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Zen Kaku Gothic New","Noto Sans JP",system-ui,sans-serif;line-height:1.75;font-size:16px}
+.wrap{max-width:1500px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:clamp(24px,3.2vw,36px);line-height:1.3;margin:0 0 6px}
+h2{font-size:24px;line-height:1.35;margin:0 0 4px}
+.lead{color:var(--mute);margin:0 0 18px;max-width:62em}
+.card{background:var(--card);border:1px solid var(--soft);border-radius:16px}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px}
+.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:0 0 18px}
+.three .card{padding:14px 18px}
+.three b{display:block;font-size:17px;margin-bottom:2px}
+.three span{color:var(--mute);font-size:14.5px}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start}
+@media (max-width:1100px){.stage{grid-template-columns:1fr}}
+.figcard{padding:12px 12px 8px}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.steps button,.fs{font:inherit;font-size:14px;border:1.5px solid var(--soft);background:var(--bg);color:var(--ink);border-radius:999px;padding:5px 12px;cursor:pointer;line-height:1.4}
+.fs{margin-left:auto;background:var(--card)}
+.steps button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.steps i{font-style:normal;display:inline-block;width:18px;height:18px;border-radius:50%;line-height:18px;text-align:center;font-size:11px;font-weight:700;background:var(--ink);color:var(--bg);margin-right:5px}
+.steps button[aria-pressed="true"] i{background:var(--bg);color:var(--ink)}
+button:focus-visible,.chip:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.stage:fullscreen{background:var(--bg);padding:16px;overflow:auto;align-content:start}
+.fig-scroll{overflow-x:auto}
+figure{margin:0}
+figcaption{font-size:13px;color:var(--mute);padding:8px 4px 4px}
+svg.map{display:block;width:100%;min-width:900px;height:auto}
+.stage:fullscreen svg.map{min-width:0}
+.map text{font-family:"Zen Kaku Gothic New","Noto Sans JP",sans-serif;fill:var(--ink)}
+.map .grp rect{fill-opacity:.06;stroke-opacity:.5;stroke-width:1.5}
+.map .grp text{font-size:15px;font-weight:700;paint-order:stroke;stroke:var(--card);stroke-width:6px;stroke-linejoin:round}
+.map .k1 rect,.map .k1 .bar{fill:var(--c1);stroke:var(--c1)} .map .grp.k1 text{fill:var(--c1)}
+.map .k2 rect,.map .k2 .bar{fill:var(--c2);stroke:var(--c2)} .map .grp.k2 text{fill:var(--c2)}
+.map .k3 rect,.map .k3 .bar{fill:var(--c3);stroke:var(--c3)} .map .grp.k3 text{fill:var(--c3)}
+.map .k4 rect,.map .k4 .bar{fill:var(--c4);stroke:var(--c4)} .map .grp.k4 text{fill:var(--c4)}
+.map .k5 rect,.map .k5 .bar{fill:var(--c5);stroke:var(--c5)} .map .grp.k5 text{fill:var(--c5)}
+.map .k6 rect,.map .k6 .bar{fill:var(--c6);stroke:var(--c6)} .map .grp.k6 text{fill:var(--c6)}
+.map .k7 rect,.map .k7 .bar{fill:var(--c7);stroke:var(--c7)} .map .grp.k7 text{fill:var(--c7)}
+.map .node .bg{fill:var(--box);stroke:var(--line);stroke-width:1.3;fill-opacity:1;stroke-opacity:1}
+.map .node .bar{stroke:none}
+.map .node{cursor:pointer;transition:opacity .25s}
+.map .node:hover .bg,.map .node:focus-visible .bg{stroke:var(--ink);stroke-width:2.4}
+.map .node:focus{outline:none}
+.map .node.sel .bg{stroke:var(--ink);stroke-width:3}
+.map .nt{font-size:16px;font-weight:700}
+.map .ns{font-size:12px;fill:var(--mute)}
+.map .edge{transition:opacity .25s}
+.map .edge polyline{fill:none;stroke:var(--line);stroke-width:1.8}
+.map .edge .ah{fill:var(--line)}
+.map .edge .pill{fill:var(--pill);stroke:var(--soft)}
+.map .edge .el{font-size:12.5px}
+.map.dim .node:not(.on){opacity:.15}
+.map.dim .edge{opacity:.08}
+.map.dim .edge.on{opacity:1}
+.map.dim .edge.on polyline{stroke:var(--ink);stroke-width:2.4}
+.map.dim .edge.on .ah{fill:var(--ink)}
+.map.dim .grp{opacity:.45}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--mute);padding:6px 4px 2px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.panel{padding:20px 20px 18px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+@media (max-width:1100px){.panel{position:static;max-height:none}}
+.kick{font-size:13px;color:var(--mute);margin:0 0 4px}
+.panel h2{font-size:23px;margin:0 0 10px}
+.panel h3{font-size:13px;letter-spacing:.04em;color:var(--mute);margin:16px 0 4px}
+.panel p{margin:0 0 6px}
+.say{border-left:5px solid var(--accent);padding:2px 0 2px 12px}
+.pro{border-left:5px solid var(--line);padding:2px 0 2px 12px;font-size:14.5px}
+.lim{background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;padding:6px 10px;font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{font:inherit;font-size:13.5px;border:1.5px solid var(--soft);background:var(--bg);color:var(--ink);border-radius:8px;padding:2px 9px;cursor:pointer}
+.ev{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--mute);margin:0;padding-left:18px}
+.nav{display:flex;gap:8px;margin-top:14px}
+.nav button{font:inherit;font-size:14px;border:1.5px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:10px;padding:6px 14px;cursor:pointer}
+.nav button.ghost{background:transparent;color:var(--ink)}
+.nav button[disabled]{opacity:.35;cursor:default}
+section{margin-top:40px}
+.embfig{padding:14px 16px}
+svg.emb{display:block;width:100%;min-width:760px;height:auto}
+.emb text{font-family:"Zen Kaku Gothic New","Noto Sans JP",sans-serif;fill:var(--ink)}
+.emb .ba{fill:var(--c4)} .emb .bb{fill:var(--c2)}
+.emb .base{stroke:var(--line);stroke-width:1}
+.emb .lab{font-size:15px;font-weight:700} .emb .sub{font-size:12.5px;fill:var(--mute)}
+.emb .g0{fill:var(--soft)} .emb .g1{fill:var(--c3);fill-opacity:.55} .emb .g2{fill:var(--c2);fill-opacity:.7}
+.emb .tick{stroke:var(--ink);stroke-width:1.5} .emb .gt{font-size:12px;font-family:"JetBrains Mono",monospace}
+.emb .gl{font-size:12px;font-weight:700} .emb .gv{font-size:18px;font-weight:700;font-family:"JetBrains Mono",monospace}
+.emb .mk{fill:var(--ink)}
+.emb .cell{fill:var(--box);stroke:var(--line)} .emb .hot{fill:var(--c4);fill-opacity:.85}
+.emb .ar{stroke:var(--line);stroke-width:1.8;fill:none} .emb .arh{fill:var(--line)}
+.emb .note{font-size:12px;fill:var(--mute)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:14px}
+.two .card{padding:14px 18px}
+.two h3{font-size:17px;margin:0 0 6px}
+.two p{margin:0 0 6px;font-size:15px}
+.two .x{font-size:13.5px;color:var(--mute)}
+.tbl-scroll{overflow-x:auto;margin-top:12px}
+table.parts{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
+table.parts th{text-align:left;font-size:12.5px;color:var(--mute);font-weight:700;padding:8px;border-bottom:2px solid var(--soft)}
+table.parts td{padding:8px;border-top:1px solid var(--soft);vertical-align:top}
+table.parts td:first-child{white-space:nowrap;font-weight:700}
+.kdot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.gap li{margin-bottom:6px}
+.foot{margin-top:30px;font-size:13px;color:var(--mute)}
+@media (prefers-reduced-motion: reduce){.map .node,.map .edge{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Geo Decision Agent ─ 何を組み合わせて動いているか</h1>
+  <p class="lead">このシステムは、いくつかの会社や公的機関のサービスを“部品”として組み合わせて作っています。どの部品が何をしていて、どうつながっているかを1枚にしました。部品をクリックすると、中学生向けの説明と専門家向けの説明、根拠になったファイルが右に出ます。</p>
+
+  <div class="three">
+    <div class="card"><b>① 家は Cloudflare</b><span>画面・司令塔・データベース・写真の倉庫は、Cloudflare の計算機の上で動いています（無料プラン）。</span></div>
+    <div class="card"><b>② 目は Google の衛星、口は Claude</b><span>土地を測るのは Google Earth Engine の衛星データ。結果を言葉にするのは Anthropic の Claude。</span></div>
+    <div class="card"><b>③ 裏づけは公的データ</b><span>生き物の記録（GBIF）、災害リスク（国土地理院）、保護区（OpenStreetMap）で確かめます。</span></div>
+  </div>
+
+  <div class="stage">
+    <div class="card figcard">
+      <div class="steps" id="steps" role="group" aria-label="説明のステップ"></div>
+      <div class="fig-scroll"><figure>
+        <svg class="map" id="map" viewBox="0 0 1240 760" role="img" aria-label="利用者のブラウザが Cloudflare 上の API を呼び、API が Claude、Google Earth Engine、公的データに問い合わせ、結果を D1 と R2 に残す。開発は GitHub から GitHub Actions で Cloudflare に配信される">
+          <title>Geo Decision Agent のしくみ図</title>
+__SVG__
+        </svg>
+        <figcaption>左が使う人、真ん中が Cloudflare の上で動くこのシステム、右が問い合わせ先、下が作って届ける流れ。矢印は「頼む方 → 頼まれる方」。地図の画像だけは、ブラウザが配信元から直接取りに行きます。</figcaption>
+      </figure></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <aside class="card panel" id="panel" aria-live="polite"></aside>
+  </div>
+
+  <section>
+    <h2>Google の「衛星エンベディング」って何？</h2>
+    <p class="lead">このシステムの中心になる測り方です。1年分の衛星観測を、10m四方ごとに<b>64個の数字の並び（指紋）</b>にまとめたデータを Google が公開しています。似た土地は似た並びになるので、「現地で確認した生き物のすみか」と並びが似ているマスを探せます。</p>
+    <div class="card embfig"><div class="fig-scroll"><figure>
+      <svg class="emb" viewBox="0 0 1000 300" role="img" aria-label="10mマスの64個の数字と、確認済み現地記録の平均の64個の数字を比べ、似ている度合いを0から1で出し、0.85以上を優先度A、0.70以上を類似とする">
+        <title>衛星エンベディングで似ている度合いを測るしくみ</title>
+        <g>
+          <rect class="cell" x="20" y="60" width="150" height="150" rx="6"/>
+          <path class="ar" d="M20 97.5H170M20 135H170M20 172.5H170M57.5 60V210M95 60V210M132.5 60V210"/>
+          <rect class="hot" x="95" y="97.5" width="37.5" height="37.5"/>
+          <text class="lab" x="95" y="236" text-anchor="middle">この10mマス</text>
+          <text class="sub" x="95" y="254" text-anchor="middle">（2024年の1年分）</text>
+        </g>
+        <path class="ar" d="M178 116H236"/><polygon class="arh" points="244,116 234,111 234,121"/>
+        <text class="lab" x="250" y="22">このマスの指紋（64個の数字）</text>
+        <line class="base" x1="250" y1="80" x2="634" y2="80"/>
+        <text class="lab" x="250" y="142">お手本の指紋（現地で確認したすみかの平均）</text>
+        <line class="base" x1="250" y1="200" x2="634" y2="200"/>
+        __EMB__
+        <path class="ar" d="M646 80H668V200H646M668 131H686"/><polygon class="arh" points="694,131 684,126 684,136"/>
+        <text class="lab" x="700" y="58">似ている度合い</text>
+        <text class="sub" x="700" y="76">（コサイン類似度・0〜1）</text>
+        __GAUGE__
+        <text class="sub" x="700" y="190">0.85以上＝優先度A、0.70以上＝類似</text>
+        <text class="sub" x="700" y="208">去年の指紋と比べた差（1−類似度）が</text>
+        <text class="sub" x="700" y="226">0.15以上なら「大きな変化（要現地確認）」</text>
+        <text class="note" x="250" y="288">※ 棒の高さはしくみを見せるためのイメージで、実際の値ではありません（この例の類似度は __COS__）。</text>
+      </svg>
+      <figcaption>専門家向け：<span class="mono">GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL</span>（A00〜A63、10m、年次）。Google DeepMind の AlphaEarth Foundations が作ったデータ（公開情報）。基準ベクトルは確認済みの現地記録（最大5件）の平均。しきい値は <span class="mono">worker/src/lib/mesh.ts:46-56</span>。</figcaption>
+    </figure></div></div>
+    <div class="two">
+      <div class="card"><h3>なぜ「指紋」で比べるのか</h3><p>植物の量（NDVI）のような1つの見方だけだと、「緑が多い」ことしか分かりません。指紋は地形・水・植生・季節の変わり方などをまとめて表すので、「確認済みのすみかに<b>どれだけ似た土地か</b>」を測れます。</p><p class="x">ただし似ていることは「いる」ことの証明ではありません。だから結果は「現地で確かめる優先順位」として出し、根拠区分（実測／推定）を必ず付けます。</p></div>
+      <div class="card"><h3>植生指数（Sentinel-2）は補助線</h3><p>欧州の衛星 Sentinel-2 の画像から、植物の量（NDVI）、葉の元気さ（NDRE）、水分（NDMI）、焼けや伐採の目安（NBR）を計算し、前年と比べます。</p><p class="x">専門家向け：<span class="mono">COPERNICUS/S2_SR_HARMONIZED</span> の年間メディアンから4指数を1回の計算で取得（<span class="mono">earthEngine.ts:330-342</span>）。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>部品の一覧</h2>
+    <p class="lead">図に出てくる部品をすべて並べました。根拠の欄は、2026年10月3日時点でコードと照合したファイルです。</p>
+    <div class="card tbl-scroll"><table class="parts"><thead><tr><th>部品</th><th>何をしている？</th><th>技術的には</th><th>根拠</th></tr></thead><tbody id="parts"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>無料プランの制約と、そのための工夫</h2>
+    <div class="two">
+      <div class="card"><h3>1回の処理は CPU 10ミリ秒まで</h3><p>重い計算はできません。ハザードマップの画像は中身を開かず、「あるか（200）・ないか（404）」と大きさだけで判定します。</p><p class="x">手元の開発環境はこの上限をかけないので、手元で動いても本番で落ちることがあります。</p></div>
+      <div class="card"><h3>1回の処理で外部に頼めるのは50回まで</h3><p>メッシュ解析は16マスずつ区切って何度も呼びます。一度取った衛星の値はデータベースにメモして、二度目からは聞きません。</p><p class="x">最悪の場合で1回あたり約38回（16マス×2年＋お手本の作成＋認証）。</p></div>
+      <div class="card"><h3>AIの料金は月 ¥5,000 まで</h3><p>AIを使うたびに料金を記録し、月の合計が上限に届いたら AI を呼ばずに止めます。上限は設定画面で変えられます。</p><p class="x"><span class="mono">usage_log</span> の当月合計で判定（<span class="mono">routes/chat.ts:58-89</span>）。</p></div>
+      <div class="card"><h3>失敗を「なかった」にしない</h3><p>外部のデータが取れなかったときは「取れなかった」と記録し、報告書には「判定不可」と出します。相手側の混雑と、こちらの不具合も分けて記録します。</p><p class="x"><span class="mono">public_data_cache.status</span> = ok / failed / busy / empty。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>専門家向け：文書とコードのずれ（直す候補）</h2>
+    <p class="lead">棚卸しの途中で見つかった、説明とコードが食い違っている箇所です。隠さずに載せています。</p>
+    <ul class="card gap" style="padding:16px 18px 10px 36px">
+      <li>植生指数の計算で、コメントは SCL（雲などの分類）によるマスクに触れているが、式グラフに SCL の処理は無く、単純な年間メディアンになっている（<span class="mono">earthEngine.ts:330-331</span>）。</li>
+      <li>docs/ARCHITECTURE.md は「失敗したバッチは指数的に間隔をあけて再試行」と書くが、実装は 800ms×回数 の線形待ちで、3回続けて失敗したら止まる（<span class="mono">MeshView.tsx:299-303</span>）。</li>
+      <li>docs/ARCHITECTURE.md の外部呼び出し数（16×2＝32）は、お手本の作成（最大5回）と認証（1回）を数えていない。最悪で約38回だが、上限の50には収まる。</li>
+      <li>docs/EXTERNAL_SERVICES.md の GBIF の説明は IUCN 区分の集計だけだが、実装は種の数の集計（<span class="mono">facet=speciesKey</span>）も並列で呼んでいる。</li>
+      <li>Earth Engine への呼び出しには、タイムアウトと再試行がまだ無い（<span class="mono">earthEngine.ts:127</span>）。</li>
+    </ul>
+  </section>
+
+  <div class="foot">
+    <p>この図の部品と配線は、2026年10月3日時点のコードを読んで確認しました（wrangler.toml、worker/src、frontend/src、.github/workflows）。鍵の名前は載せていますが、値はどこにも記録していません。データの持ち方は「データの仕組み（ER図）」を参照してください。生成元：<span class="mono">docs/system-map/</span>（<span class="mono">data.js</span> を直して <span class="mono">build.py</span> を実行）。</p>
+  </div>
+</div>
+
+<script>
+__DATA__
+</script>
+<script>
+(function(){
+var svg = document.getElementById('map'), panel = document.getElementById('panel'), stepsEl = document.getElementById('steps');
+var BW = 1240, BH = 760, ASPECT = BW / BH;
+var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+var KIND = {"人":1,"Cloudflare":5,"外部（ブラウザ直）":3,"外部API":6,"Google":4,"公的データ":2,"開発":7};
+var nodes = {}, edges = [], step = 0, sel = null;
+[].forEach.call(svg.querySelectorAll('.node'), function(g){ nodes[g.dataset.n] = g; });
+[].forEach.call(svg.querySelectorAll('.edge'), function(g){ edges.push(g); });
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+document.getElementById('legend').innerHTML = Object.keys(KIND).map(function(k){ return '<span><i style="background:var(--c' + KIND[k] + ')"></i>' + esc(k) + '</span>'; }).join('');
+
+var h = '<button type="button" data-s="0" aria-pressed="true">全体</button>';
+STEPS.forEach(function(s, i){ h += '<button type="button" data-s="' + (i + 1) + '" aria-pressed="false"><i>' + (i + 1) + '</i>' + esc(s.t) + '</button>'; });
+if(document.documentElement.requestFullscreen) h += '<button type="button" class="fs" id="fs">全画面で発表</button>';
+stepsEl.innerHTML = h;
+stepsEl.addEventListener('click', function(e){ var b = e.target.closest('button[data-s]'); if(b) go(+b.dataset.s); });
+var fs = document.getElementById('fs'); if(fs) fs.onclick = function(){ var st = document.querySelector('.stage'); if(document.fullscreenElement) document.exitFullscreen(); else st.requestFullscreen(); };
+
+var cur = {x:0, y:0, w:BW, h:BH}, raf = 0;
+function setVB(v){ cur = v; svg.setAttribute('viewBox', v.x + ' ' + v.y + ' ' + v.w + ' ' + v.h); }
+function target(ids){
+  if(!ids.length) return {x:0, y:0, w:BW, h:BH};
+  var x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  ids.forEach(function(n){ var r = nodes[n].querySelector('.bg'); var x = +r.getAttribute('x'), y = +r.getAttribute('y');
+    x1 = Math.min(x1, x); y1 = Math.min(y1, y); x2 = Math.max(x2, x + +r.getAttribute('width')); y2 = Math.max(y2, y + +r.getAttribute('height')); });
+  x1 -= 70; y1 -= 70; x2 += 70; y2 += 70;
+  var w = x2 - x1, hh = y2 - y1;
+  if(w / hh < ASPECT){ var nw = hh * ASPECT; x1 -= (nw - w) / 2; w = nw; } else { var nh = w / ASPECT; y1 -= (nh - hh) / 2; hh = nh; }
+  if(w > BW){ return {x:0, y:0, w:BW, h:BH}; }
+  x1 = Math.max(0, Math.min(x1, BW - w)); y1 = Math.max(0, Math.min(y1, BH - hh));
+  return {x:x1, y:y1, w:w, h:hh};
+}
+function animateTo(t){
+  cancelAnimationFrame(raf);
+  if(reduce){ setVB(t); return; }
+  var from = cur, t0 = null;
+  function ease(p){ return p < .5 ? 2*p*p : 1 - Math.pow(-2*p + 2, 2) / 2; }
+  function tick(ts){ if(t0 === null) t0 = ts; var p = Math.min(1, (ts - t0) / 650), k = ease(p);
+    setVB({x: from.x + (t.x - from.x) * k, y: from.y + (t.y - from.y) * k, w: from.w + (t.w - from.w) * k, h: from.h + (t.h - from.h) * k});
+    if(p < 1) raf = requestAnimationFrame(tick); }
+  raf = requestAnimationFrame(tick);
+}
+function focus(ids, eids){
+  var on = {}; ids.forEach(function(n){ on[n] = 1; });
+  var eon = {}; (eids || []).forEach(function(x){ eon[x] = 1; });
+  svg.classList.toggle('dim', ids.length > 0);
+  Object.keys(nodes).forEach(function(n){ nodes[n].classList.toggle('on', !!on[n]); nodes[n].classList.toggle('sel', n === sel); });
+  edges.forEach(function(g){ g.classList.toggle('on', eids ? !!eon[g.id] : (on[g.dataset.a] && on[g.dataset.b])); });
+}
+function chips(ids){ return '<div class="chips">' + ids.map(function(n){ return '<button type="button" class="chip" data-n="' + n + '">' + esc(NODES[n].t) + '</button>'; }).join('') + '</div>'; }
+function overview(){
+  panel.innerHTML = '<p class="kick">はじめに</p><h2>7つの場面で見る</h2>' +
+    '<p class="say">このシステムは、<b>画面を開く → AIに相談する → 衛星で測る → 公的データで裏をとる → 記録を残す</b>という流れで動きます。裏では<b>自分で健康診断</b>をし、改良は<b>作って届ける</b>流れで本番に届きます。</p>' +
+    '<h3>見方</h3><p>① から順に押すか、キーボードの <b>→ ←</b> で進みます。部品を直接クリックしてもかまいません。</p>' +
+    '<p class="pro">専門家向け：Cloudflare Workers（Hono）＋ Workers Static Assets ＋ D1 ＋ R2 ＋ Cron。外部は Anthropic Messages API、Google OAuth2 / Earth Engine REST、GBIF、国土地理院タイル、Overpass。CI/CD は GitHub Actions。</p>' +
+    '<div class="nav"><button type="button" id="start">① から説明する →</button></div>';
+  document.getElementById('start').onclick = function(){ go(1); };
+}
+function renderStep(n){
+  var s = STEPS[n - 1];
+  panel.innerHTML = '<p class="kick">場面 ' + n + ' / ' + STEPS.length + '</p><h2>' + esc(s.t) + '</h2>' +
+    '<p class="say">' + esc(s.plain) + '</p><h3>専門的には</h3><p class="pro">' + esc(s.expert) + '</p>' +
+    '<h3>出てくる部品（クリックで詳細）</h3>' + chips(s.n) +
+    '<div class="nav"><button type="button" class="ghost" id="prev">← 前へ</button><button type="button" id="next"' + (n === STEPS.length ? ' disabled' : '') + '>次へ →</button></div>';
+  document.getElementById('prev').onclick = function(){ go(n - 1); };
+  if(n < STEPS.length) document.getElementById('next').onclick = function(){ go(n + 1); };
+}
+function renderNode(id){
+  var d = NODES[id];
+  panel.innerHTML = '<p class="kick"><span class="kdot" style="background:var(--c' + KIND[d.k] + ')"></span>' + esc(d.k) + '</p>' +
+    '<h2>' + esc(d.t) + '</h2><p class="mono" style="margin:-6px 0 8px;color:var(--mute)">' + esc(d.s) + '</p>' +
+    '<p class="say">' + esc(d.plain) + '</p><h3>専門的には</h3><p class="pro">' + esc(d.expert) + '</p>' +
+    (d.why ? '<h3>なぜこうしたか</h3><p>' + esc(d.why) + '</p>' : '') +
+    (d.lim ? '<h3>制約・注意</h3><p class="lim">' + esc(d.lim) + '</p>' : '') +
+    '<h3>根拠（確認したファイル）</h3><ul class="ev">' + d.ev.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+    '<div class="nav"><button type="button" class="ghost" id="back">← 戻る</button></div>';
+  document.getElementById('back').onclick = function(){ sel = null; go(step); };
+}
+panel.addEventListener('click', function(e){ var c = e.target.closest('.chip'); if(c) pick(c.dataset.n); });
+function press(){ [].forEach.call(stepsEl.querySelectorAll('button[data-s]'), function(b){ b.setAttribute('aria-pressed', String(!sel && +b.dataset.s === step)); }); }
+function go(n){
+  step = Math.max(0, Math.min(STEPS.length, n)); sel = null; press();
+  var s = step ? STEPS[step - 1] : null;
+  focus(s ? s.n : [], s ? s.e : null); animateTo(target(s ? s.n : []));
+  if(s) renderStep(step); else overview();
+}
+function pick(id){
+  sel = id; press();
+  var near = {}; near[id] = 1;
+  edges.forEach(function(g){ if(g.dataset.a === id) near[g.dataset.b] = 1; if(g.dataset.b === id) near[g.dataset.a] = 1; });
+  var ids = Object.keys(near);
+  focus(ids, null); animateTo(target(ids)); renderNode(id);
+  if(window.innerWidth <= 1100) panel.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'nearest'});
+}
+svg.addEventListener('click', function(e){ var g = e.target.closest('.node'); if(g) pick(g.dataset.n); });
+svg.addEventListener('keydown', function(e){ var g = e.target.closest && e.target.closest('.node'); if(g && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); pick(g.dataset.n); } });
+document.addEventListener('keydown', function(e){
+  if(e.key === 'ArrowRight'){ if(!sel) go(step + 1); }
+  else if(e.key === 'ArrowLeft'){ if(!sel) go(step - 1); }
+  else if(e.key === 'Escape'){ if(sel){ sel = null; go(step); } else go(0); }
+});
+document.getElementById('parts').innerHTML = Object.keys(NODES).map(function(id){ var d = NODES[id];
+  return '<tr><td><span class="kdot" style="background:var(--c' + KIND[d.k] + ')"></span>' + esc(d.t) + '<div class="mono" style="font-weight:400;color:var(--mute)">' + esc(d.s) + '</div></td><td>' + esc(d.plain) + '</td><td>' + esc(d.expert) + '</td><td class="mono">' + d.ev.map(esc).join('<br>') + '</td></tr>'; }).join('');
+go(0);
+})();
+</script>
+</body>
+</html>

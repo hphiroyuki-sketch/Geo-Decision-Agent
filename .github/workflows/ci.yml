@@ -1,0 +1,37 @@
+name: CI
+
+# Checks only. This workflow never deploys and never touches production:
+# it has no Cloudflare credentials, and `wrangler deploy --dry-run` only bundles.
+on:
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Typecheck the Worker
+        run: npm run typecheck:worker
+
+      - name: Build the frontend (includes tsc -b)
+        run: npm run build:frontend
+
+      # Bundles the Worker exactly as a deploy would, without uploading it, so a
+      # bundling error shows up on the PR instead of in the production deploy.
+      - name: Bundle the Worker without deploying
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/worker-bundle"

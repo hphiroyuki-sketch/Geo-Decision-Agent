@@ -222,3 +222,28 @@ if (!map.getLayer("streets")) { timer = setTimeout(attempt, 100); return; }
 **注意**: **新しいモデルを `settings.claude_model` に設定するときは、
 この表にも追加すること。** 表に無いモデルは `claude-sonnet-5` の単価で計算され、
 予算判定がずれる。
+
+## ADR-016 会話の記録はリポジトリではなく Google Drive に置く
+
+**決定**: 依頼と作業の全記録（事業の話を含む）は Google Drive の「Geo Decision Agent — 会話と作業の記録」に置く。
+リポジトリには、技術と開発の記録（`docs/memory/STATE.md`・`docs/HISTORY.md`・`CHANGELOG.md`・ADR）だけを置く。
+
+**理由**: このリポジトリは**公開**で、誰でも読める（2026-10-03 確認）。会話には事業計画、顧客候補、
+メンターの助言、個人の経歴が含まれる。公開の場に置けば消しても履歴に残る。
+
+**注意**: サブエージェントには Google Drive などのコネクタが渡らない。Drive への追記は、
+親（オーケストレーター）のセッションが行う。置き場所の一覧は `docs/memory/README.md`。
+
+## ADR-017 GitHub Flow・セマンティックバージョニング・CHANGELOG で版を管理する
+
+**決定**: main を本番の正本とし、作業ブランチ → PR（自動検査）→ main へのマージ → 自動デプロイ、の流れにする。
+出荷の区切りに `vX.Y.Z` のタグと GitHub Release を作り、`CHANGELOG.md` を人の言葉で書く。
+問題が起きたら `wrangler rollback <版ID>` で戻し、悪いコミットを `git revert` する。
+D1 のマイグレーションは「足すだけ」にして、コードを戻しても動く状態を保つ。
+
+**理由**: 何かあったときに、1つ前の版へ数分で戻せるようにするため。
+これまでは「push＝本番」で、どの版が動いているか、どこへ戻せばよいかを名前で言えなかった。
+
+**状態**: 2026-10-03 時点で、本番の動きを変えない部分（CHANGELOG、PR のひな形、PR 用 CI、
+`v0.1.0` タグ）だけを導入した。**main への切り替えと `deploy.yml` の変更は、創業者の判断待ち。**
+手順と判断項目は `docs/DEVELOPMENT_WORKFLOW.md`。

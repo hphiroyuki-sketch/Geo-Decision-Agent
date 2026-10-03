@@ -17,6 +17,8 @@
 | 6 | **[DECISIONS.md](DECISIONS.md)** | **ADR。「なぜこうなっているのか」。変更する前に必ず読む** | 15分 |
 | 7 | [HISTORY.md](HISTORY.md) | 実際に踏んだ不具合と根本原因。**同じ罠を踏まないため** | 15分 |
 | 8 | [OPERATIONS.md](OPERATIONS.md) | デプロイ・シークレット・本番確認・トラブル対応 | 実務時 |
+| 9 | **[DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md)** | **ブランチ・版番号・CHANGELOG・ロールバック・D1の復旧。変更を出す前に読む** | 10分 |
+| 10 | [memory/](memory/) | **今の状態（STATE.md）と、記録の置き場所。セッションの最初に読む** | 3分 |
 
 ## 目的別
 
@@ -29,12 +31,16 @@
 | 帳票の内容を変える | DOMAIN ＋ `worker/src/lib/leap.ts` ＋ `frontend/src/pages/LeapReport.tsx` |
 | 外部データ源を足す | EXTERNAL_SERVICES ＋ **DECISIONS ADR-006（負例の必須化）** |
 | 不具合を調べる | HISTORY ＋ OPERATIONS §8 |
+| 本番を前の版に戻す | DEVELOPMENT_WORKFLOW §7〜§8 |
+| 今どうなっているか知る | memory/STATE.md |
 | 要件との対応を確認する | REQUIREMENTS_COVERAGE.md |
 
-## 利用者向け
+## 利用者・説明用
 
 | 文書 | 内容 |
 |---|---|
+| [er-diagram/](er-diagram/) | **データの仕組み（ER図・HTML）。** 25テーブルを7つの役割で説明。中学生向けと専門家向けの説明つき。発表用の拡大表示あり |
+| [system-map/](system-map/) | **しくみ図（技術構成・HTML）。** Cloudflare・Claude・Earth Engine・公的データ・GitHub の組み合わせと、衛星エンベディングの測り方 |
 | [manual/](manual/) | **操作ガイド（HTML）。** IT に詳しくない利用者向け。画面写真と画面遷移図つきで、ログインから報告書のPDF出力までを説明 |
 
 ## 経緯の記録（当時の判断のまま残してある文書）

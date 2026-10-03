@@ -5,3 +5,4 @@ frontend/tsconfig.tsbuildinfo
 .dev.vars
 *.log
 .DS_Store
+__pycache__/

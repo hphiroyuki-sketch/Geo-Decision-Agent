@@ -13,6 +13,26 @@
 会話履歴が失われていても、`docs/` を読めば完全に理解できる状態を維持すること。
 **したがって、設計判断を伴う変更をしたら `docs/` も同じコミットで更新する。**
 
+### 記憶（セッションをまたいで引き継ぐもの）
+
+- **最初に `docs/memory/STATE.md` を読む。** 今の本番の版、進行中の作業、創業者の判断待ちが書いてある
+- **終わりに記録する。** `STATE.md` を上書き、`docs/HISTORY.md` と `CHANGELOG.md` の [Unreleased] に追記、
+  Google Drive の「Geo Decision Agent — 会話と作業の記録」に今回の依頼を1件追記（置き場所は `docs/memory/README.md`）
+- **このリポジトリは公開。** 事業の話（顧客候補・計画・メンターの助言・個人の事情）はリポジトリに書かず、Drive 側へ（ADR-016）
+
+### チームで進める
+
+依頼が大きいときは、ひとりで抱えずサブエージェントに分担する（`.claude/agents/`）。
+
+| 係 | 使いどころ |
+|---|---|
+| `researcher` | 外部の仕様・手順・制度を出典つきで調べる |
+| `code-auditor` | コードの棚卸し、文書とコードのずれ探し（読み取り専用） |
+| `reviewer` | **コミット前に必ず**差分を点検する（読み取り専用） |
+| `recorder` | 作業後に STATE・HISTORY・CHANGELOG を更新する |
+
+サブエージェントには Notion・Google Drive などのコネクタが渡らない。それらは親セッションが扱う。
+
 ---
 
 ## このシステムの性質（最重要）
@@ -44,6 +64,10 @@ TNFD LEAP に沿った判定を返す。だから次は譲れない。
 
 `claude/ai-chat-app-build-s7fut7` で作業し、ここへ push する。
 **push すると GitHub Actions が自動でデプロイする**（マイグレーション適用を含む）。
+
+**版の管理は `docs/DEVELOPMENT_WORKFLOW.md` に従う**（GitHub Flow・セマンティックバージョニング・CHANGELOG・ロールバック）。
+main への移行は創業者の判断待ちで、それまでは上の通り。**push は本番デプロイなので、創業者の了承なしに push しない。**
+戻すときは `npx wrangler rollback <版ID>`（ID を必ず明示）＋ `git revert`。
 
 ### 検証
 
